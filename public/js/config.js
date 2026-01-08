@@ -93,6 +93,9 @@ async function loadConfig() {
                 if (form.elements['HEARTBEAT_INTERVAL']) form.elements['HEARTBEAT_INTERVAL'].value = json.server.heartbeatInterval || '';
                 if (form.elements['MEMORY_CLEANUP_INTERVAL']) form.elements['MEMORY_CLEANUP_INTERVAL'].value = json.server.memoryCleanupInterval || '';
             }
+            if (json.api) {
+                if (form.elements['API_USE']) form.elements['API_USE'].value = json.api.use || 'sandbox';
+            }
             if (json.defaults) {
                 if (form.elements['DEFAULT_TEMPERATURE']) form.elements['DEFAULT_TEMPERATURE'].value = json.defaults.temperature ?? '';
                 if (form.elements['DEFAULT_TOP_P']) form.elements['DEFAULT_TOP_P'].value = json.defaults.topP ?? '';
@@ -214,6 +217,7 @@ async function saveConfig(e) {
     // 处理checkbox：未选中的checkbox不会出现在FormData中
     jsonConfig.other.skipProjectIdFetch = form.elements['SKIP_PROJECT_ID_FETCH']?.checked || false;
     jsonConfig.other.useNativeAxios = form.elements['USE_NATIVE_AXIOS']?.checked || false;
+    jsonConfig.api = { use: form.elements['API_USE']?.value || 'sandbox' };
     jsonConfig.other.useContextSystemPrompt = form.elements['USE_CONTEXT_SYSTEM_PROMPT']?.checked || false;
     jsonConfig.other.mergeSystemPrompt = form.elements['MERGE_SYSTEM_PROMPT']?.checked ?? true;
     jsonConfig.other.officialPromptPosition = form.elements['OFFICIAL_PROMPT_POSITION']?.value || 'before';

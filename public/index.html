@@ -250,6 +250,13 @@ html.tab-logs .tab[data-tab="logs"] {
                                         <input type="text" name="HOST" placeholder="0.0.0.0">
                                     </div>
                                 </div>
+                                <div class="form-group compact">
+                                    <label>API 环境 <span class="help-tip" data-tooltip="选择使用 sandbox 或 production 环境的 API 接口">?</span></label>
+                                    <select name="API_USE" id="apiUseSelect">
+                                        <option value="sandbox">Sandbox (测试)</option>
+                                        <option value="production">Production (生产)</option>
+                                    </select>
+                                </div>
                                 <div class="form-row-inline">
                                     <div class="form-group compact">
                                         <label>最大请求大小</label>
