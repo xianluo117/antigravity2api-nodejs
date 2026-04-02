@@ -1268,7 +1268,7 @@ router.post("/proxy-pool/test", cookieAuthMiddleware, async (req, res) => {
         poolRaw: workingPoolRaw,
         disabledPoolRaw,
         persist: false,
-        reason: `代理测试返回 407: ${PROXY_TEST_TARGET_URL}`,
+        reason: `代理测试返回 407: ${getProxyTestTargetUrl()}`,
       });
       testResult.disableResult = disableResult;
       testResult.autoDisabled = disableResult.changed === true;
