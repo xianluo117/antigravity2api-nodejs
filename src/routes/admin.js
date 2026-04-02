@@ -96,6 +96,29 @@ function summarizeProxyTestError(error) {
   return error.message || "请求失败";
 }
 
+function inferProxyTestStatus(error) {
+  const responseStatus = error?.response?.status;
+  if (Number.isInteger(responseStatus)) {
+    return responseStatus;
+  }
+
+  const candidates = [error?.message, error?.error, error?.response?.data]
+    .filter(Boolean)
+    .map((value) => String(value));
+
+  for (const text of candidates) {
+    const match = text.match(/\b(407|403|401|400|429|500|502|503|504)\b/);
+    if (match) {
+      return Number.parseInt(match[1], 10);
+    }
+    if (/proxy authentication required/i.test(text)) {
+      return 407;
+    }
+  }
+
+  return null;
+}
+
 function buildProxyTestLogText(payload = {}) {
   const summary = payload.summary || {};
   const results = Array.isArray(payload.results) ? payload.results : [];
@@ -252,7 +275,7 @@ async function testSingleProxyConnectivity({ proxyEntry, proxyProtocol }) {
     return result;
   } catch (error) {
     result.durationMs = Date.now() - startedAt;
-    result.status = error?.response?.status || null;
+    result.status = inferProxyTestStatus(error);
     result.message = summarizeProxyTestError(error);
     result.logLines.push(
       `[error] status=${result.status ?? ""} durationMs=${result.durationMs} message=${result.message}`,
