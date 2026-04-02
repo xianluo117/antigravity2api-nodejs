@@ -96,6 +96,39 @@ function summarizeProxyTestError(error) {
   return error.message || "请求失败";
 }
 
+function buildProxyTestLogText(payload = {}) {
+  const summary = payload.summary || {};
+  const results = Array.isArray(payload.results) ? payload.results : [];
+  const headerLines = [
+    `proxy-test-time: ${new Date().toISOString()}`,
+    `request-mode: ${summary.requestMode || "-"}`,
+    `target-url: ${summary.targetUrl || "-"}`,
+    `concurrency: ${summary.concurrency || 0}`,
+    `tested: ${summary.tested || 0}`,
+    `success: ${summary.success || 0}`,
+    `failed: ${summary.failed || 0}`,
+    `auto-disabled: ${summary.autoDisabled || 0}`,
+    "",
+  ];
+
+  const sections = results.map((item, index) => {
+    const lines = Array.isArray(item.logLines) ? item.logLines : [];
+    return [
+      `===== proxy #${index + 1} =====`,
+      `raw: ${item.raw || ""}`,
+      `mode: ${item.requestMode || ""}`,
+      `status: ${item.status ?? ""}`,
+      `success: ${item.success === true}`,
+      `autoDisabled: ${item.autoDisabled === true}`,
+      `message: ${item.message || ""}`,
+      ...lines,
+      "",
+    ].join("\n");
+  });
+
+  return [...headerLines, ...sections].join("\n");
+}
+
 function countProxyPoolEntries(poolRaw = "") {
   const normalized = normalizeProxyPoolInput(poolRaw);
   return normalized ? normalized.split("\n").length : 0;
@@ -145,6 +178,7 @@ async function testSingleProxyConnectivity({ proxyEntry, proxyProtocol }) {
     disableResult: null,
     shouldDisable: false,
     message: "",
+    logLines: [],
   };
 
   try {
@@ -159,8 +193,14 @@ async function testSingleProxyConnectivity({ proxyEntry, proxyProtocol }) {
       url: null,
     };
     let response;
+    result.logLines.push(
+      `[start] mode=${requestMode} target=${targetUrl} proxy=${proxyEntry.url}`,
+    );
 
     if (config.useNativeAxios === true) {
+      result.logLines.push(
+        "[request] transport=Axios method=POST no-credential",
+      );
       response = await httpRequest({
         method: "POST",
         url: targetUrl,
@@ -174,6 +214,7 @@ async function testSingleProxyConnectivity({ proxyEntry, proxyProtocol }) {
       });
     } else {
       const requester = getProxyTestRequester();
+      result.logLines.push("[request] transport=TLS method=POST no-credential");
       response = await requester.request({
         method: "POST",
         url: targetUrl,
@@ -190,6 +231,14 @@ async function testSingleProxyConnectivity({ proxyEntry, proxyProtocol }) {
 
     result.status = response.status;
     result.durationMs = Date.now() - startedAt;
+    result.logLines.push(
+      `[response] status=${response.status} durationMs=${result.durationMs}`,
+    );
+    if (typeof response.data === "string" && response.data) {
+      result.logLines.push(
+        `[response-body] ${response.data.slice(0, 1000).replace(/\r\n/g, "\\n")}`,
+      );
+    }
 
     if (response.status === 407) {
       result.success = false;
@@ -205,6 +254,20 @@ async function testSingleProxyConnectivity({ proxyEntry, proxyProtocol }) {
     result.durationMs = Date.now() - startedAt;
     result.status = error?.response?.status || null;
     result.message = summarizeProxyTestError(error);
+    result.logLines.push(
+      `[error] status=${result.status ?? ""} durationMs=${result.durationMs} message=${result.message}`,
+    );
+    const errorBody =
+      typeof error?.response?.data === "string"
+        ? error.response.data
+        : error?.response?.data
+          ? JSON.stringify(error.response.data)
+          : "";
+    if (errorBody) {
+      result.logLines.push(
+        `[error-body] ${errorBody.slice(0, 1000).replace(/\r\n/g, "\\n")}`,
+      );
+    }
 
     if (result.status === 407) {
       result.shouldDisable = true;
@@ -1234,6 +1297,8 @@ router.post("/proxy-pool/test", cookieAuthMiddleware, async (req, res) => {
         results,
         poolRaw: workingPoolRaw,
         disabledPoolRaw,
+        logText: buildProxyTestLogText({ summary, results }),
+        downloadFilename: `proxy-test-${Date.now()}.log`,
       },
     });
   } catch (error) {

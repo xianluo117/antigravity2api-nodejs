@@ -102,9 +102,15 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+let lastProxyTestLogText = "";
+let lastProxyTestLogFilename = "proxy-test.log";
+
 function resetProxyTestResults() {
   const summaryEl = document.getElementById("proxyTestSummaryText");
   const resultsEl = document.getElementById("proxyTestResults");
+  const downloadBtn = document.getElementById("proxyTestDownloadBtn");
+  lastProxyTestLogText = "";
+  lastProxyTestLogFilename = "proxy-test.log";
   if (summaryEl) {
     summaryEl.textContent = "未开始测试";
   }
@@ -112,6 +118,28 @@ function resetProxyTestResults() {
     resultsEl.innerHTML =
       '<div class="empty-state-small">点击“测试代理池”后展示逐条代理测试结果</div>';
   }
+  if (downloadBtn) {
+    downloadBtn.disabled = true;
+  }
+}
+
+function downloadProxyTestLog() {
+  if (!lastProxyTestLogText) {
+    showToast("暂无可下载的测试日志", "warning");
+    return;
+  }
+
+  const blob = new Blob([lastProxyTestLogText], {
+    type: "text/plain;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = lastProxyTestLogFilename || "proxy-test.log";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function renderProxyTestResults(payload) {
@@ -120,6 +148,13 @@ function renderProxyTestResults(payload) {
   const form = document.getElementById("configForm");
   const summaryEl = document.getElementById("proxyTestSummaryText");
   const resultsEl = document.getElementById("proxyTestResults");
+  const downloadBtn = document.getElementById("proxyTestDownloadBtn");
+
+  lastProxyTestLogText = payload?.logText || "";
+  lastProxyTestLogFilename = payload?.downloadFilename || "proxy-test.log";
+  if (downloadBtn) {
+    downloadBtn.disabled = !lastProxyTestLogText;
+  }
 
   if (form) {
     if (form.elements["PROXY_POOL"] && payload?.poolRaw !== undefined) {
@@ -154,6 +189,9 @@ function renderProxyTestResults(payload) {
       const disabledBadge = item.autoDisabled
         ? '<span style="display:inline-flex;margin-left:8px;padding:2px 8px;border-radius:999px;background:rgba(239,68,68,.16);color:#ef4444;font-size:12px;">已转入禁用池</span>'
         : "";
+      const detailLog = Array.isArray(item.logLines)
+        ? item.logLines.join("\n")
+        : "";
       return `
         <div style="padding:12px;border-bottom:1px solid rgba(255,255,255,.08);">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
@@ -161,6 +199,10 @@ function renderProxyTestResults(payload) {
             <span style="color:${badgeColor};font-weight:600;">${escapeHtml(item.success ? "代理通过" : "代理失败")}</span>
           </div>
           <div style="margin-top:6px;opacity:.9;word-break:break-all;">${escapeHtml(item.requestMode || "-")} | ${escapeHtml(statusText)} | ${escapeHtml(String(item.durationMs || 0))} ms | ${escapeHtml(item.message || "")}</div>
+          <details style="margin-top:8px;">
+            <summary style="cursor:pointer;opacity:.9;">查看详细回调日志</summary>
+            <pre style="margin-top:8px;white-space:pre-wrap;word-break:break-word;background:rgba(0,0,0,.18);padding:10px;border-radius:8px;font-size:12px;line-height:1.5;">${escapeHtml(detailLog || "无详细日志")}</pre>
+          </details>
         </div>
       `;
     })
@@ -170,6 +212,7 @@ function renderProxyTestResults(payload) {
 async function testProxyPool() {
   const form = document.getElementById("configForm");
   const button = document.getElementById("proxyPoolTestBtn");
+  const downloadBtn = document.getElementById("proxyTestDownloadBtn");
   if (!form || !button) return;
 
   const proxyPool = normalizeProxyPoolInput(
@@ -190,6 +233,9 @@ async function testProxyPool() {
   const originalText = button.textContent;
   button.disabled = true;
   button.textContent = "测试中...";
+  if (downloadBtn) {
+    downloadBtn.disabled = true;
+  }
 
   const summaryEl = document.getElementById("proxyTestSummaryText");
   const resultsEl = document.getElementById("proxyTestResults");
