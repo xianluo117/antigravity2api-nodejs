@@ -1,5 +1,7 @@
 import dotenv from "dotenv";
 import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
 import { getModelsWithQuotas } from "../api/client.js";
 import { getGeminiCliQuotas } from "../api/geminicli_client.js";
 import geminicliTokenManager from "../auth/geminicli_token_manager.js";
@@ -8,6 +10,7 @@ import oauthManager from "../auth/oauth_manager.js";
 import quotaManager from "../auth/quota_manager.js";
 import tokenManager from "../auth/token_manager.js";
 import config, { getConfigJson, saveConfigJson } from "../config/config.js";
+import fingerprintRequester from "../requester.js";
 import { reloadConfig } from "../utils/configReloader.js";
 import { deepMerge } from "../utils/deepMerge.js";
 import { parseEnvFile, updateEnvFile } from "../utils/envParser.js";
@@ -26,8 +29,32 @@ import {
 
 const envPath = getEnvPath();
 const PROXY_TEST_TARGET_URL = "https://translate.google.com/?hl=zh-cn";
+const PROXY_TEST_TIMEOUT = 15000;
+const PROXY_TEST_CONCURRENCY = 10;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const router = express.Router();
+let proxyTestRequester = null;
+
+function getProxyTestModeLabel() {
+  return config.useNativeAxios === true ? "Axios" : "TLS";
+}
+
+function getProxyTestRequester() {
+  if (proxyTestRequester) return proxyTestRequester;
+
+  const isPkg = typeof process.pkg !== "undefined";
+  const configPath = isPkg
+    ? path.join(path.dirname(process.execPath), "bin", "tls_config.json")
+    : path.join(__dirname, "..", "bin", "tls_config.json");
+
+  proxyTestRequester = fingerprintRequester.create({
+    configPath,
+    timeout: Math.ceil(PROXY_TEST_TIMEOUT / 1000),
+  });
+
+  return proxyTestRequester;
+}
 
 function summarizeProxyTestError(error) {
   if (!error) return "未知错误";
@@ -67,13 +94,9 @@ async function runWithConcurrency(items, concurrency, worker) {
   return results;
 }
 
-async function testSingleProxyConnectivity({
-  proxyEntry,
-  proxyProtocol,
-  poolRaw,
-  disabledPoolRaw,
-}) {
+async function testSingleProxyConnectivity({ proxyEntry, proxyProtocol }) {
   const startedAt = Date.now();
+  const requestMode = getProxyTestModeLabel();
   const result = {
     raw: proxyEntry.raw,
     url: proxyEntry.url,
@@ -82,6 +105,7 @@ async function testSingleProxyConnectivity({
     port: proxyEntry.port,
     username: proxyEntry.username,
     targetUrl: PROXY_TEST_TARGET_URL,
+    requestMode,
     success: false,
     status: null,
     durationMs: 0,
@@ -92,30 +116,47 @@ async function testSingleProxyConnectivity({
   };
 
   try {
-    const response = await httpRequest({
-      method: "GET",
-      url: PROXY_TEST_TARGET_URL,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache",
-      },
-      timeout: Math.min(Number(config.timeout) || 300000, 15000),
-      skipProxyAutoDisable: true,
-      proxy: {
-        enabled: true,
-        mode: "pool",
-        protocol: proxyProtocol,
-        poolRaw: proxyEntry.raw,
-        disabledPoolRaw: "",
-        url: null,
-      },
-      responseType: "text",
-      validateStatus: () => true,
-    });
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+    };
+    const proxyConfig = {
+      enabled: true,
+      mode: "pool",
+      protocol: proxyProtocol,
+      poolRaw: proxyEntry.raw,
+      disabledPoolRaw: "",
+      url: null,
+    };
+    let response;
+
+    if (config.useNativeAxios === true) {
+      response = await httpRequest({
+        method: "GET",
+        url: PROXY_TEST_TARGET_URL,
+        headers,
+        timeout: Math.min(Number(config.timeout) || 300000, PROXY_TEST_TIMEOUT),
+        skipProxyAutoDisable: true,
+        proxy: proxyConfig,
+        responseType: "text",
+        validateStatus: () => true,
+      });
+    } else {
+      const requester = getProxyTestRequester();
+      response = await requester.antigravity_fetch(PROXY_TEST_TARGET_URL, {
+        method: "GET",
+        headers,
+        timeout_ms: Math.min(
+          Number(config.timeout) || 300000,
+          PROXY_TEST_TIMEOUT,
+        ),
+        proxy: proxyConfig,
+      });
+    }
 
     result.status = response.status;
     result.durationMs = Date.now() - startedAt;
@@ -127,13 +168,8 @@ async function testSingleProxyConnectivity({
       return result;
     }
 
-    if (response.status >= 200 && response.status < 400) {
-      result.success = true;
-      result.message = `连通成功 (HTTP ${response.status})`;
-      return result;
-    }
-
-    result.message = `连通失败 (HTTP ${response.status})`;
+    result.success = true;
+    result.message = `代理已连通 Google，上游返回 ${response.status}，按规则视为通过`;
     return result;
   } catch (error) {
     result.durationMs = Date.now() - startedAt;
@@ -1088,7 +1124,7 @@ router.post("/proxy-pool/test", cookieAuthMiddleware, async (req, res) => {
       });
     }
 
-    const concurrencyLimit = 10;
+    const concurrencyLimit = PROXY_TEST_CONCURRENCY;
     let workingPoolRaw = poolRaw;
 
     const results = await runWithConcurrency(
@@ -1098,8 +1134,6 @@ router.post("/proxy-pool/test", cookieAuthMiddleware, async (req, res) => {
         testSingleProxyConnectivity({
           proxyEntry,
           proxyProtocol,
-          poolRaw: workingPoolRaw,
-          disabledPoolRaw,
         }),
     );
 
@@ -1151,6 +1185,7 @@ router.post("/proxy-pool/test", cookieAuthMiddleware, async (req, res) => {
       failed: results.filter((item) => !item.success).length,
       autoDisabled: results.filter((item) => item.autoDisabled).length,
       concurrency: concurrencyLimit,
+      requestMode: getProxyTestModeLabel(),
       targetUrl: PROXY_TEST_TARGET_URL,
       proxyProtocol,
       remainingActiveCount: countProxyPoolEntries(workingPoolRaw),

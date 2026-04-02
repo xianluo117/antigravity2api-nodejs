@@ -137,7 +137,7 @@ function renderProxyTestResults(payload) {
   updateProxyPoolSummary();
 
   if (summaryEl) {
-    summaryEl.textContent = `目标 ${summary.targetUrl || "-"} | 并发 ${summary.concurrency || 1} 条 | 共 ${summary.tested || 0} 条 | 成功 ${summary.success || 0} 条 | 失败 ${summary.failed || 0} 条 | 自动禁用 ${summary.autoDisabled || 0} 条`;
+    summaryEl.textContent = `模式 ${summary.requestMode || "-"} | 目标 ${summary.targetUrl || "-"} | 并发 ${summary.concurrency || 1} 条 | 共 ${summary.tested || 0} 条 | 通过 ${summary.success || 0} 条 | 407禁用 ${summary.autoDisabled || 0} 条`;
   }
 
   if (!resultsEl) return;
@@ -158,9 +158,9 @@ function renderProxyTestResults(payload) {
         <div style="padding:12px;border-bottom:1px solid rgba(255,255,255,.08);">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
             <div style="font-weight:600;word-break:break-all;">#${index + 1} ${escapeHtml(item.raw || item.url || "")}${disabledBadge}</div>
-            <span style="color:${badgeColor};font-weight:600;">${escapeHtml(item.success ? "连通成功" : "连通失败")}</span>
+            <span style="color:${badgeColor};font-weight:600;">${escapeHtml(item.success ? "代理通过" : "代理失败")}</span>
           </div>
-          <div style="margin-top:6px;opacity:.9;word-break:break-all;">${escapeHtml(statusText)} | ${escapeHtml(String(item.durationMs || 0))} ms | ${escapeHtml(item.message || "")}</div>
+          <div style="margin-top:6px;opacity:.9;word-break:break-all;">${escapeHtml(item.requestMode || "-")} | ${escapeHtml(statusText)} | ${escapeHtml(String(item.durationMs || 0))} ms | ${escapeHtml(item.message || "")}</div>
         </div>
       `;
     })
@@ -194,7 +194,8 @@ async function testProxyPool() {
   const summaryEl = document.getElementById("proxyTestSummaryText");
   const resultsEl = document.getElementById("proxyTestResults");
   if (summaryEl) {
-    summaryEl.textContent = "正在并发测试代理，请稍候...（同时最多 10 条）";
+    const mode = form.elements["USE_NATIVE_AXIOS"]?.checked ? "Axios" : "TLS";
+    summaryEl.textContent = `正在以 ${mode} 模式并发测试代理，请稍候...（同时最多 10 条，仅 407 视为代理失败）`;
   }
   if (resultsEl) {
     resultsEl.innerHTML =
