@@ -43,6 +43,30 @@ function countProxyPoolEntries(poolRaw = "") {
   return normalized ? normalized.split("\n").length : 0;
 }
 
+async function runWithConcurrency(items, concurrency, worker) {
+  const list = Array.isArray(items) ? items : [];
+  const limit = Math.max(1, Number(concurrency) || 1);
+  const results = new Array(list.length);
+  let nextIndex = 0;
+
+  async function runner() {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= list.length) {
+        return;
+      }
+      results[currentIndex] = await worker(list[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, list.length) }, () => runner()),
+  );
+
+  return results;
+}
+
 async function testSingleProxyConnectivity({
   proxyEntry,
   proxyProtocol,
@@ -63,6 +87,7 @@ async function testSingleProxyConnectivity({
     durationMs: 0,
     autoDisabled: false,
     disableResult: null,
+    shouldDisable: false,
     message: "",
   };
 
@@ -96,17 +121,8 @@ async function testSingleProxyConnectivity({
     result.durationMs = Date.now() - startedAt;
 
     if (response.status === 407) {
-      const disableResult = moveProxyToDisabledPool({
-        proxyEntry,
-        proxyProtocol,
-        poolRaw,
-        disabledPoolRaw,
-        persist: true,
-        reason: `代理测试返回 407: ${PROXY_TEST_TARGET_URL}`,
-      });
       result.success = false;
-      result.autoDisabled = disableResult.changed === true;
-      result.disableResult = disableResult;
+      result.shouldDisable = true;
       result.message = "代理认证失败(407)，已自动转移到禁用池";
       return result;
     }
@@ -125,16 +141,7 @@ async function testSingleProxyConnectivity({
     result.message = summarizeProxyTestError(error);
 
     if (result.status === 407) {
-      const disableResult = moveProxyToDisabledPool({
-        proxyEntry,
-        proxyProtocol,
-        poolRaw,
-        disabledPoolRaw,
-        persist: true,
-        reason: `代理测试异常返回 407: ${PROXY_TEST_TARGET_URL}`,
-      });
-      result.autoDisabled = disableResult.changed === true;
-      result.disableResult = disableResult;
+      result.shouldDisable = true;
       result.message = "代理认证失败(407)，已自动转移到禁用池";
     }
 
@@ -1081,23 +1088,61 @@ router.post("/proxy-pool/test", cookieAuthMiddleware, async (req, res) => {
       });
     }
 
-    const results = [];
+    const concurrencyLimit = 10;
     let workingPoolRaw = poolRaw;
 
-    for (const proxyEntry of entries) {
-      const testResult = await testSingleProxyConnectivity({
-        proxyEntry,
+    const results = await runWithConcurrency(
+      entries,
+      concurrencyLimit,
+      async (proxyEntry) =>
+        testSingleProxyConnectivity({
+          proxyEntry,
+          proxyProtocol,
+          poolRaw: workingPoolRaw,
+          disabledPoolRaw,
+        }),
+    );
+
+    for (const testResult of results) {
+      if (!testResult?.shouldDisable) continue;
+      const disableResult = moveProxyToDisabledPool({
+        proxyEntry: {
+          raw: testResult.raw,
+          url: testResult.url,
+          protocol: testResult.protocol,
+          host: testResult.host,
+          port: testResult.port,
+          username: testResult.username,
+        },
         proxyProtocol,
         poolRaw: workingPoolRaw,
         disabledPoolRaw,
+        persist: false,
+        reason: `代理测试返回 407: ${PROXY_TEST_TARGET_URL}`,
       });
-
-      results.push(testResult);
-
-      if (testResult.disableResult?.changed) {
-        workingPoolRaw = testResult.disableResult.nextPoolRaw;
-        disabledPoolRaw = testResult.disableResult.nextDisabledPoolRaw;
+      testResult.disableResult = disableResult;
+      testResult.autoDisabled = disableResult.changed === true;
+      if (disableResult.changed) {
+        workingPoolRaw = disableResult.nextPoolRaw;
+        disabledPoolRaw = disableResult.nextDisabledPoolRaw;
       }
+    }
+
+    if (
+      disabledPoolRaw !==
+        normalizeProxyPoolInput(currentJson.other?.disabledProxyPool || "") ||
+      workingPoolRaw !==
+        normalizeProxyPoolInput(currentJson.other?.proxyPool || "")
+    ) {
+      saveConfigJson({
+        other: {
+          proxyProtocol,
+          proxyPool: workingPoolRaw,
+          disabledProxyPool: disabledPoolRaw,
+        },
+      });
+      dotenv.config({ override: true });
+      reloadConfig();
     }
 
     const summary = {
@@ -1105,6 +1150,7 @@ router.post("/proxy-pool/test", cookieAuthMiddleware, async (req, res) => {
       success: results.filter((item) => item.success).length,
       failed: results.filter((item) => !item.success).length,
       autoDisabled: results.filter((item) => item.autoDisabled).length,
+      concurrency: concurrencyLimit,
       targetUrl: PROXY_TEST_TARGET_URL,
       proxyProtocol,
       remainingActiveCount: countProxyPoolEntries(workingPoolRaw),

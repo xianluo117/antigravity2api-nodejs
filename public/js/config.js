@@ -129,14 +129,15 @@ function renderProxyTestResults(payload) {
       form.elements["DISABLED_PROXY_POOL"] &&
       payload?.disabledPoolRaw !== undefined
     ) {
-      form.elements["DISABLED_PROXY_POOL"].value = payload.disabledPoolRaw || "";
+      form.elements["DISABLED_PROXY_POOL"].value =
+        payload.disabledPoolRaw || "";
     }
   }
 
   updateProxyPoolSummary();
 
   if (summaryEl) {
-    summaryEl.textContent = `目标 ${summary.targetUrl || "-"} | 共 ${summary.tested || 0} 条 | 成功 ${summary.success || 0} 条 | 失败 ${summary.failed || 0} 条 | 自动禁用 ${summary.autoDisabled || 0} 条`;
+    summaryEl.textContent = `目标 ${summary.targetUrl || "-"} | 并发 ${summary.concurrency || 1} 条 | 共 ${summary.tested || 0} 条 | 成功 ${summary.success || 0} 条 | 失败 ${summary.failed || 0} 条 | 自动禁用 ${summary.autoDisabled || 0} 条`;
   }
 
   if (!resultsEl) return;
@@ -171,7 +172,9 @@ async function testProxyPool() {
   const button = document.getElementById("proxyPoolTestBtn");
   if (!form || !button) return;
 
-  const proxyPool = normalizeProxyPoolInput(form.elements["PROXY_POOL"]?.value || "");
+  const proxyPool = normalizeProxyPoolInput(
+    form.elements["PROXY_POOL"]?.value || "",
+  );
   const disabledProxyPool = normalizeProxyPoolInput(
     form.elements["DISABLED_PROXY_POOL"]?.value || "",
   );
@@ -191,10 +194,11 @@ async function testProxyPool() {
   const summaryEl = document.getElementById("proxyTestSummaryText");
   const resultsEl = document.getElementById("proxyTestResults");
   if (summaryEl) {
-    summaryEl.textContent = "正在逐条测试代理，请稍候...";
+    summaryEl.textContent = "正在并发测试代理，请稍候...（同时最多 10 条）";
   }
   if (resultsEl) {
-    resultsEl.innerHTML = '<div class="empty-state-small">正在测试代理连通性...</div>';
+    resultsEl.innerHTML =
+      '<div class="empty-state-small">正在测试代理连通性...</div>';
   }
 
   try {
