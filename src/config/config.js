@@ -247,6 +247,9 @@ export function getProxyConfig(jsonConfig = {}) {
     jsonConfig.other?.proxyProtocol || "http",
   );
   const proxyPool = normalizeProxyPoolInput(jsonConfig.other?.proxyPool || "");
+  const disabledProxyPool = normalizeProxyPoolInput(
+    jsonConfig.other?.disabledProxyPool || "",
+  );
   const allRequests = jsonConfig.other?.proxyAllRequests === true;
 
   if (proxyPool) {
@@ -256,6 +259,7 @@ export function getProxyConfig(jsonConfig = {}) {
       allRequests,
       protocol: proxyProtocol,
       poolRaw: proxyPool,
+      disabledPoolRaw: disabledProxyPool,
       url: null,
     };
   }
@@ -268,6 +272,7 @@ export function getProxyConfig(jsonConfig = {}) {
       allRequests,
       protocol: proxyProtocol,
       poolRaw: "",
+      disabledPoolRaw: disabledProxyPool,
       url: process.env.PROXY,
     };
   }
@@ -293,6 +298,7 @@ export function getProxyConfig(jsonConfig = {}) {
           ? "https"
           : "http",
       poolRaw: "",
+      disabledPoolRaw: disabledProxyPool,
       url: systemProxy,
     };
   }
@@ -303,6 +309,7 @@ export function getProxyConfig(jsonConfig = {}) {
     allRequests,
     protocol: proxyProtocol,
     poolRaw: "",
+    disabledPoolRaw: disabledProxyPool,
     url: null,
   };
 }

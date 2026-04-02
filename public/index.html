@@ -10,7 +10,7 @@
     <!-- 防止页面闪烁：在渲染前根据Tab状态设置初始显示 -->
     <script>
       (function () {
-        window.__STATIC_VERSION__ = "20260331-1";
+        window.__STATIC_VERSION__ = "20260402-1";
         // 初始状态：auth-checking 表示正在验证登录状态
         // 验证完成后会变成 auth-ready + logged-in 或 auth-ready
         var currentTab = localStorage.getItem("currentTab") || "tokens";
@@ -596,6 +596,9 @@
                     onchange="setActiveSettingSection(this.value, true)"
                   >
                     <option value="section-server">🖥️ 服务器</option>
+                    <option value="section-disabled-proxy">
+                      ⛔ 禁用代理池
+                    </option>
                     <option value="section-model">🎛️ 模型参数</option>
                     <option value="section-rotation">🔄 轮询与性能</option>
                     <option value="section-security">🛡️ 安全管理</option>
@@ -608,6 +611,16 @@
                       onclick="setActiveSettingSection('section-server', true)"
                     >
                       🖥️ 服务器
+                    </button>
+                    <button
+                      type="button"
+                      class="settings-nav-item"
+                      data-target="section-disabled-proxy"
+                      onclick="
+                        setActiveSettingSection('section-disabled-proxy', true)
+                      "
+                    >
+                      ⛔ 禁用代理池
                     </button>
                     <button
                       type="button"
@@ -760,14 +773,54 @@
                           >代理池
                           <span
                             class="help-tip"
-                            data-tooltip="支持多行输入，每行格式支持 `IP:port:username:password` 或 `username:password@IP:port`。代理协议由左侧选择。每次请求自动轮询，并持久化轮询进度。"
+                            data-tooltip="支持多行输入，每行支持 `IP:port:username:password`、`username:password@IP:port`，也支持完整 URL，如 `socks5://username:password@IP:port`。未填写协议前缀时，将按左侧代理协议解析。每次请求自动轮询，并持久化轮询进度。"
                             >?</span
                           ></label
                         >
                         <textarea
                           name="PROXY_POOL"
                           rows="4"
-                          placeholder="1.2.3.4:8080:username:password&#10;username:password@1.2.3.5:8081"
+                          placeholder="1.2.3.4:8080:username:password&#10;username:password@1.2.3.5:8081&#10;socks5://username:password@1.2.3.6:1080"
+                        ></textarea>
+                      </div>
+                    </div>
+
+                    <!-- 禁用代理池 -->
+                    <div class="config-section" id="section-disabled-proxy">
+                      <h4>⛔ 禁用代理池</h4>
+                      <div class="security-info">
+                        <p>
+                          当上游代理返回
+                          <code>407</code>
+                          时，对应代理会自动从启用代理池移入禁用代理池。
+                        </p>
+                        <ul>
+                          <li>启用代理池中的条目会自动跳过禁用池内的代理</li>
+                          <li>
+                            管理员可在此查看、修复、删除或重新启用禁用代理
+                          </li>
+                          <li>支持与代理池相同的多行格式输入</li>
+                        </ul>
+                      </div>
+                      <div class="rotation-status" id="proxyPoolSummary">
+                        <span class="rotation-label">当前状态:</span>
+                        <span id="proxyPoolSummaryText"
+                          >启用池 0 条 | 禁用池 0 条</span
+                        >
+                      </div>
+                      <div class="form-group compact">
+                        <label
+                          >禁用代理池
+                          <span
+                            class="help-tip"
+                            data-tooltip="支持多行输入，每行支持 `IP:port:username:password`、`username:password@IP:port`，也支持完整 URL，如 `socks5://username:password@IP:port`。当代理修复后，可从此处移除并重新加入上方代理池。"
+                            >?</span
+                          ></label
+                        >
+                        <textarea
+                          name="DISABLED_PROXY_POOL"
+                          rows="8"
+                          placeholder="1.2.3.4:8080:username:password&#10;username:password@1.2.3.5:8081&#10;socks5://username:password@1.2.3.6:1080"
                         ></textarea>
                       </div>
                     </div>

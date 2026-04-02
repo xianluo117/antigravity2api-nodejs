@@ -63,6 +63,36 @@ function inferProxyProtocolFromValue(proxyValue) {
   return "http";
 }
 
+function normalizeProxyPoolInput(poolRaw) {
+  return String(poolRaw || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function countProxyPoolEntries(poolRaw) {
+  const normalized = normalizeProxyPoolInput(poolRaw);
+  if (!normalized) return 0;
+  return normalized.split("\n").length;
+}
+
+function updateProxyPoolSummary() {
+  const form = document.getElementById("configForm");
+  const summaryEl = document.getElementById("proxyPoolSummaryText");
+  if (!form || !summaryEl) return;
+
+  const activeCount = countProxyPoolEntries(
+    form.elements["PROXY_POOL"]?.value || "",
+  );
+  const disabledCount = countProxyPoolEntries(
+    form.elements["DISABLED_PROXY_POOL"]?.value || "",
+  );
+  summaryEl.textContent = `启用池 ${activeCount} 条 | 禁用池 ${disabledCount} 条`;
+}
+
 // 正规化换行符（用于比较）
 function normalizeNewlines(str) {
   return (str || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
@@ -204,6 +234,9 @@ async function loadConfig() {
           );
         if (form.elements["PROXY_POOL"])
           form.elements["PROXY_POOL"].value = json.other.proxyPool ?? "";
+        if (form.elements["DISABLED_PROXY_POOL"])
+          form.elements["DISABLED_PROXY_POOL"].value =
+            json.other.disabledProxyPool ?? "";
         if (form.elements["PROXY_ALL_REQUESTS"])
           form.elements["PROXY_ALL_REQUESTS"].checked =
             json.other.proxyAllRequests === true;
@@ -257,6 +290,8 @@ async function loadConfig() {
           );
         }
       }
+
+      updateProxyPoolSummary();
 
       // 加载官方系统提示词
       if (form.elements["OFFICIAL_SYSTEM_PROMPT"]) {
@@ -414,13 +449,12 @@ async function saveConfig(e) {
   jsonConfig.other.proxyProtocol = normalizeProxyProtocol(
     form.elements["PROXY_PROTOCOL"]?.value || "http",
   );
-  jsonConfig.other.proxyPool = (form.elements["PROXY_POOL"]?.value || "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join("\n");
+  jsonConfig.other.proxyPool = normalizeProxyPoolInput(
+    form.elements["PROXY_POOL"]?.value || "",
+  );
+  jsonConfig.other.disabledProxyPool = normalizeProxyPoolInput(
+    form.elements["DISABLED_PROXY_POOL"]?.value || "",
+  );
   jsonConfig.other.proxyAllRequests =
     form.elements["PROXY_ALL_REQUESTS"]?.checked || false;
   jsonConfig.other.useContextSystemPrompt =
@@ -488,7 +522,8 @@ async function saveConfig(e) {
         key === "CACHE_THINKING" ||
         key === "FAKE_NON_STREAM" ||
         key === "PROXY_PROTOCOL" ||
-        key === "PROXY_POOL"
+        key === "PROXY_POOL" ||
+        key === "DISABLED_PROXY_POOL"
       ) {
         // 跳过，已在上面处理
       } else if (key === "ROTATION_STRATEGY")
@@ -592,4 +627,13 @@ document.addEventListener("DOMContentLoaded", () => {
   if (typeof setActiveSettingSection === "function") {
     setActiveSettingSection(activeSettingSectionId, false);
   }
+
+  ["PROXY_POOL", "DISABLED_PROXY_POOL"].forEach((name) => {
+    const el = document.querySelector(`[name="${name}"]`);
+    if (el) {
+      el.addEventListener("input", updateProxyPoolSummary);
+    }
+  });
+
+  updateProxyPoolSummary();
 });

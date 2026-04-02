@@ -1,7 +1,11 @@
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import config from "../config/config.js";
+import config, {
+  getConfigJson,
+  getProxyConfig,
+  saveConfigJson,
+} from "../config/config.js";
 import logger from "./logger.js";
 import { getDataDir } from "./paths.js";
 
@@ -33,6 +37,10 @@ function normalizeLines(value = "") {
     .replace(/\r/g, "\n");
 }
 
+export function normalizeProxyPoolInput(poolRaw = "") {
+  return splitPoolLines(poolRaw).join("\n");
+}
+
 function splitPoolLines(poolRaw = "") {
   return normalizeLines(poolRaw)
     .split("\n")
@@ -46,6 +54,38 @@ function buildProxyUrl({ protocol, host, port, username = "", password = "" }) {
     : "";
 
   return `${protocol}://${auth}${host}:${port}`;
+}
+
+function getProxyIdentity(proxyEntry) {
+  if (!proxyEntry) return "";
+  if (proxyEntry.normalizedUrl) return proxyEntry.normalizedUrl;
+
+  const protocol = normalizeProxyProtocol(proxyEntry.protocol || "http");
+  const host = String(proxyEntry.host || "").trim();
+  const port = Number.parseInt(proxyEntry.port, 10);
+  if (!host || !Number.isInteger(port) || port <= 0) {
+    return String(proxyEntry.url || proxyEntry.raw || "").trim();
+  }
+
+  return buildProxyUrl({
+    protocol,
+    host,
+    port,
+    username: proxyEntry.username || "",
+    password: proxyEntry.password || "",
+  });
+}
+
+function dedupeProxyEntries(entries = []) {
+  const seen = new Set();
+  return entries.filter((entry) => {
+    const identity = getProxyIdentity(entry);
+    if (!identity || seen.has(identity)) {
+      return false;
+    }
+    seen.add(identity);
+    return true;
+  });
 }
 
 function parseProxyUrl(proxyUrl) {
@@ -68,6 +108,16 @@ function parseProxyUrl(proxyUrl) {
       username: decodeURIComponent(parsedUrl.username || ""),
       password: decodeURIComponent(parsedUrl.password || ""),
       url: rawValue,
+      normalizedUrl:
+        parsedUrl.hostname && Number.parseInt(parsedUrl.port, 10) > 0
+          ? buildProxyUrl({
+              protocol,
+              host: parsedUrl.hostname,
+              port: Number.parseInt(parsedUrl.port, 10),
+              username: decodeURIComponent(parsedUrl.username || ""),
+              password: decodeURIComponent(parsedUrl.password || ""),
+            })
+          : rawValue,
     };
   } catch {
     return null;
@@ -106,6 +156,13 @@ function parseProxyPoolLine(line, protocol) {
         username,
         password,
         url: buildProxyUrl({ protocol, host, port, username, password }),
+        normalizedUrl: buildProxyUrl({
+          protocol,
+          host,
+          port,
+          username,
+          password,
+        }),
       };
     }
   }
@@ -132,6 +189,13 @@ function parseProxyPoolLine(line, protocol) {
     username,
     password,
     url: buildProxyUrl({ protocol, host, port, username, password }),
+    normalizedUrl: buildProxyUrl({
+      protocol,
+      host,
+      port,
+      username,
+      password,
+    }),
   };
 }
 
@@ -197,7 +261,7 @@ function resolveProxyEntries(proxyConfig) {
   if (typeof proxyConfig === "string") {
     const parsedUrl = parseProxyUrl(proxyConfig);
     if (parsedUrl) return [parsedUrl];
-    return parseProxyPool(proxyConfig, "http");
+    return parseProxyPool(proxyConfig, config.proxy?.protocol || "http");
   }
 
   if (typeof proxyConfig !== "object" || proxyConfig.enabled === false) {
@@ -205,13 +269,28 @@ function resolveProxyEntries(proxyConfig) {
   }
 
   if (proxyConfig.poolRaw) {
-    return parseProxyPool(proxyConfig.poolRaw, proxyConfig.protocol);
+    const entries = parseProxyPool(proxyConfig.poolRaw, proxyConfig.protocol);
+    const disabledEntries = proxyConfig.disabledPoolRaw
+      ? parseProxyPool(proxyConfig.disabledPoolRaw, proxyConfig.protocol)
+      : [];
+
+    if (disabledEntries.length === 0) {
+      return entries;
+    }
+
+    const disabledSet = new Set(
+      disabledEntries.map((entry) => getProxyIdentity(entry)),
+    );
+    return entries.filter((entry) => !disabledSet.has(getProxyIdentity(entry)));
   }
 
   if (proxyConfig.url) {
     const parsedUrl = parseProxyUrl(proxyConfig.url);
     if (parsedUrl) return [parsedUrl];
-    return parseProxyPool(proxyConfig.url, proxyConfig.protocol);
+    return parseProxyPool(
+      proxyConfig.url,
+      proxyConfig.protocol || config.proxy?.protocol || "http",
+    );
   }
 
   return [];
@@ -263,6 +342,109 @@ export function getNextProxyConfig(proxyOverride = undefined) {
     poolSize: entries.length,
     isPool: true,
   };
+}
+
+export function getProxyPoolSummary(proxyConfig = undefined) {
+  const effectiveProxy = proxyConfig !== undefined ? proxyConfig : config.proxy;
+  const protocol = normalizeProxyProtocol(
+    effectiveProxy?.protocol || config.proxy?.protocol || "http",
+  );
+
+  return {
+    protocol,
+    activeEntries:
+      effectiveProxy &&
+      typeof effectiveProxy === "object" &&
+      effectiveProxy.poolRaw
+        ? parseProxyPool(effectiveProxy.poolRaw, protocol)
+        : [],
+    disabledEntries:
+      effectiveProxy &&
+      typeof effectiveProxy === "object" &&
+      effectiveProxy.disabledPoolRaw
+        ? parseProxyPool(effectiveProxy.disabledPoolRaw, protocol)
+        : [],
+  };
+}
+
+export function disableProxyInPool(proxyEntry, reason = "") {
+  try {
+    const targetIdentity = getProxyIdentity(proxyEntry);
+    if (!targetIdentity) {
+      return { changed: false, reason: "missing_proxy_identity" };
+    }
+
+    const currentJson = getConfigJson();
+    const protocol = normalizeProxyProtocol(
+      currentJson.other?.proxyProtocol ||
+        proxyEntry?.protocol ||
+        config.proxy?.protocol ||
+        "http",
+    );
+    const activeEntries = parseProxyPool(
+      normalizeProxyPoolInput(currentJson.other?.proxyPool || ""),
+      protocol,
+    );
+    const disabledEntries = parseProxyPool(
+      normalizeProxyPoolInput(currentJson.other?.disabledProxyPool || ""),
+      protocol,
+    );
+
+    const targetEntry = activeEntries.find(
+      (entry) => getProxyIdentity(entry) === targetIdentity,
+    );
+
+    if (!targetEntry) {
+      const alreadyDisabled = disabledEntries.some(
+        (entry) => getProxyIdentity(entry) === targetIdentity,
+      );
+      return {
+        changed: false,
+        alreadyDisabled,
+        reason: alreadyDisabled
+          ? "already_disabled"
+          : "not_found_in_active_pool",
+      };
+    }
+
+    const nextActiveEntries = activeEntries.filter(
+      (entry) => getProxyIdentity(entry) !== targetIdentity,
+    );
+    const nextDisabledEntries = dedupeProxyEntries([
+      ...disabledEntries,
+      targetEntry,
+    ]);
+
+    saveConfigJson({
+      other: {
+        proxyProtocol: protocol,
+        proxyPool: nextActiveEntries.map((entry) => entry.raw).join("\n"),
+        disabledProxyPool: nextDisabledEntries
+          .map((entry) => entry.raw)
+          .join("\n"),
+      },
+    });
+
+    config.proxy = getProxyConfig(getConfigJson());
+
+    logger.warn(
+      `[ProxyPool] 代理已移入禁用池: ${targetEntry.url}${reason ? `，原因: ${reason}` : ""}`,
+    );
+
+    return {
+      changed: true,
+      entry: targetEntry,
+      activeCount: nextActiveEntries.length,
+      disabledCount: nextDisabledEntries.length,
+    };
+  } catch (error) {
+    logger.warn(`[ProxyPool] 自动禁用代理失败: ${error.message}`);
+    return {
+      changed: false,
+      reason: "disable_failed",
+      error: error.message,
+    };
+  }
 }
 
 export function formatProxyRequestInfo(proxyConfig, targetUrl = "") {

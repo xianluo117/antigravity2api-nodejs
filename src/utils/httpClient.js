@@ -8,7 +8,11 @@ import { SocksProxyAgent } from "socks-proxy-agent";
 import { Readable } from "stream";
 import config from "../config/config.js";
 import logger from "./logger.js";
-import { formatProxyRequestInfo, getNextProxyConfig } from "./proxyPool.js";
+import {
+  disableProxyInPool,
+  formatProxyRequestInfo,
+  getNextProxyConfig,
+} from "./proxyPool.js";
 
 // ==================== DNS & 代理统一配置 ====================
 
@@ -43,6 +47,34 @@ const httpsAgent = new https.Agent({
 });
 
 const proxyAgentCache = new Map();
+let proxyDisableInterceptorRegistered = false;
+
+function ensureProxyDisableInterceptor() {
+  if (proxyDisableInterceptorRegistered) return;
+
+  axios.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      const status = error?.response?.status;
+      const selectedProxy = error?.config?.__selectedProxyConfig;
+
+      if (status === 407 && selectedProxy) {
+        const result = disableProxyInPool(
+          selectedProxy,
+          `上游返回 407: ${error.config?.url || "unknown_url"}`,
+        );
+        error.proxyDisableResult = result;
+        error.proxyAutoDisabled = result.changed === true;
+      }
+
+      return Promise.reject(error);
+    },
+  );
+
+  proxyDisableInterceptorRegistered = true;
+}
+
+ensureProxyDisableInterceptor();
 
 function getProxyAgents(proxyConfig) {
   const cacheKey = proxyConfig.url;
@@ -100,7 +132,7 @@ export function buildAxiosRequestConfig({
     ? getProxyAgents(proxyConfig)
     : { httpAgent, httpsAgent };
 
-  if (proxyConfig?.isPool) {
+  if (proxyConfig) {
     logger.info(`[ProxyPool] ${formatProxyRequestInfo(proxyConfig, url)}`);
   }
 
@@ -115,6 +147,7 @@ export function buildAxiosRequestConfig({
     // 禁用自动设置 Content-Length，让 axios 使用 Transfer-Encoding: chunked
     maxContentLength: Infinity,
     maxBodyLength: Infinity,
+    __selectedProxyConfig: proxyConfig || null,
   };
 
   if (responseType) axiosConfig.responseType = responseType;

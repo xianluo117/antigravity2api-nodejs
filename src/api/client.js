@@ -278,6 +278,14 @@ async function handleApiError(error, token, dumpId = null) {
     );
   }
 
+  if (status === 407) {
+    throw createApiError(
+      `代理认证失败(407)，对应代理已自动移入禁用代理池。错误详情: ${errorBody}`,
+      status,
+      errorBody,
+    );
+  }
+
   throw createApiError(
     `API请求失败 (${status}): ${errorBody}`,
     status,

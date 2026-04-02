@@ -1,7 +1,6 @@
 import geminicliTokenManager from "../auth/geminicli_token_manager.js";
-import config from "../config/config.js";
-import quotaManager from "../auth/quota_manager.js";
 import tokenCooldownManager from "../auth/token_cooldown_manager.js";
+import config from "../config/config.js";
 import { createApiError } from "../utils/errors.js";
 import { httpRequest } from "../utils/httpClient.js";
 import { saveBase64Image } from "../utils/imageStorage.js";
@@ -113,7 +112,7 @@ function buildRequestBody(requestBody, model, projectId) {
 
 /**
  * 统一错误处理
- * 
+ *
  * 429 处理策略（参考 MD 文档第 11.3 节）：
  * - 429 不禁用凭证，只对当前凭证+当前模型设置冷却
  * - 从错误响应中解析冷却结束时间
@@ -125,6 +124,14 @@ async function handleApiError(error, token, model) {
   const status = getUpstreamStatus(error);
   const errorBody = await readUpstreamErrorBody(error);
 
+  if (status === 407) {
+    throw createApiError(
+      `代理认证失败(407)，对应代理已自动移入禁用代理池。错误详情: ${errorBody}`,
+      status,
+      errorBody,
+    );
+  }
+
   if (status === 403) {
     if (isCallerDoesNotHavePermission(errorBody)) {
       throw createApiError(
@@ -133,7 +140,10 @@ async function handleApiError(error, token, model) {
         errorBody,
       );
     }
-    geminicliTokenManager.disableCurrentToken(token, `API请求返回403: ${errorBody}`);
+    geminicliTokenManager.disableCurrentToken(
+      token,
+      `API请求返回403: ${errorBody}`,
+    );
     throw createApiError(
       `该账号没有使用权限，已自动禁用。错误详情: ${errorBody}`,
       status,
@@ -152,7 +162,8 @@ async function handleApiError(error, token, model) {
         // 尝试从错误体中提取 resetTime
         let resetTimestamp = null;
         try {
-          const parsed = typeof errorBody === "string" ? JSON.parse(errorBody) : errorBody;
+          const parsed =
+            typeof errorBody === "string" ? JSON.parse(errorBody) : errorBody;
           const resetTimeStr =
             parsed?.error?.details?.[0]?.metadata?.resetTime ||
             parsed?.resetTime ||
@@ -438,7 +449,10 @@ export async function getGeminiCliQuotas(token) {
   } catch (primaryError) {
     // retrieveUserQuota 失败，尝试 fetchAvailableModels 回退
     const primaryStatus =
-      primaryError.response?.status || primaryError.status || primaryError.statusCode || 500;
+      primaryError.response?.status ||
+      primaryError.status ||
+      primaryError.statusCode ||
+      500;
 
     // 如果是认证/权限错误，不需要回退
     if (primaryStatus === 401 || primaryStatus === 403) {

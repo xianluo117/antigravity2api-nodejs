@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import zlib from "zlib";
 import logger from "./utils/logger.js";
 import {
+  disableProxyInPool,
   formatProxyRequestInfo,
   getNextProxyConfig,
 } from "./utils/proxyPool.js";
@@ -136,10 +137,9 @@ class FingerprintRequester {
     const proxyConfig = getNextProxyConfig(
       proxy !== undefined ? proxy : this.defaults.proxy,
     );
+    config.__selectedProxyConfig = proxyConfig || null;
     if (proxyConfig) {
-      if (proxyConfig.isPool) {
-        logger.info(`[ProxyPool] ${formatProxyRequestInfo(proxyConfig, url)}`);
-      }
+      logger.info(`[ProxyPool] ${formatProxyRequestInfo(proxyConfig, url)}`);
       requestPayload.proxy = {
         enabled: true,
         type: proxyConfig.protocol,
@@ -317,6 +317,13 @@ class FingerprintRequester {
             config,
           };
 
+          if (responseStatus === 407 && config.__selectedProxyConfig) {
+            response.proxyDisableResult = disableProxyInPool(
+              config.__selectedProxyConfig,
+              `上游返回 407: ${url}`,
+            );
+          }
+
           if (!validateStatus(responseStatus)) {
             const error = new Error(
               `Request failed with status code ${responseStatus}`,
@@ -325,6 +332,7 @@ class FingerprintRequester {
               responseStatus >= 500 ? "ERR_BAD_RESPONSE" : "ERR_BAD_REQUEST";
             error.response = response;
             error.config = config;
+            error.proxyDisableResult = response.proxyDisableResult;
             return reject(error);
           }
 

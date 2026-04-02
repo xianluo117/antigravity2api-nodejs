@@ -15,7 +15,12 @@ import ipBlockManager from "../utils/ipBlockManager.js";
 import logger from "../utils/logger.js";
 import memoryManager from "../utils/memoryManager.js";
 import { getEnvPath } from "../utils/paths.js";
-import { normalizeProxyProtocol, parseProxyPool } from "../utils/proxyPool.js";
+import {
+  getProxyPoolSummary,
+  normalizeProxyPoolInput,
+  normalizeProxyProtocol,
+  parseProxyPool,
+} from "../utils/proxyPool.js";
 
 const envPath = getEnvPath();
 
@@ -795,22 +800,25 @@ router.put("/config", cookieAuthMiddleware, (req, res) => {
     const { env: envUpdates, json: jsonUpdates, password } = req.body;
 
     if (jsonUpdates?.other) {
-      const rawProxyPool = String(jsonUpdates.other.proxyPool || "")
-        .replace(/\r\n/g, "\n")
-        .replace(/\r/g, "\n")
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .join("\n");
+      const rawProxyPool = normalizeProxyPoolInput(
+        jsonUpdates.other.proxyPool || "",
+      );
+      const rawDisabledProxyPool = normalizeProxyPoolInput(
+        jsonUpdates.other.disabledProxyPool || "",
+      );
       const proxyProtocol = normalizeProxyProtocol(
         jsonUpdates.other.proxyProtocol || "http",
       );
 
       jsonUpdates.other.proxyProtocol = proxyProtocol;
       jsonUpdates.other.proxyPool = rawProxyPool;
+      jsonUpdates.other.disabledProxyPool = rawDisabledProxyPool;
 
       if (rawProxyPool) {
         parseProxyPool(rawProxyPool, proxyProtocol);
+      }
+      if (rawDisabledProxyPool) {
+        parseProxyPool(rawDisabledProxyPool, proxyProtocol);
       }
     }
 
@@ -853,6 +861,84 @@ router.put("/config", cookieAuthMiddleware, (req, res) => {
     });
   } catch (error) {
     logger.error("更新配置失败:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// 获取禁用代理池
+router.get("/proxy-pool/disabled", cookieAuthMiddleware, (req, res) => {
+  try {
+    const jsonData = getConfigJson();
+    const protocol = normalizeProxyProtocol(
+      jsonData.other?.proxyProtocol || "http",
+    );
+    const disabledPoolRaw = normalizeProxyPoolInput(
+      jsonData.other?.disabledProxyPool || "",
+    );
+    const { activeEntries, disabledEntries } = getProxyPoolSummary(
+      config.proxy,
+    );
+
+    res.json({
+      success: true,
+      data: {
+        proxyProtocol: protocol,
+        poolRaw: disabledPoolRaw,
+        count: disabledEntries.length,
+        activeCount: activeEntries.length,
+        entries: parseProxyPool(disabledPoolRaw, protocol).map(
+          (entry, index) => ({
+            index,
+            raw: entry.raw,
+            url: entry.url,
+            protocol: entry.protocol,
+            host: entry.host,
+            port: entry.port,
+            username: entry.username,
+          }),
+        ),
+      },
+    });
+  } catch (error) {
+    logger.error("获取禁用代理池失败:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// 更新禁用代理池
+router.put("/proxy-pool/disabled", cookieAuthMiddleware, (req, res) => {
+  try {
+    const currentJson = getConfigJson();
+    const proxyProtocol = normalizeProxyProtocol(
+      req.body?.proxyProtocol || currentJson.other?.proxyProtocol || "http",
+    );
+    const poolRaw = normalizeProxyPoolInput(req.body?.poolRaw || "");
+
+    if (poolRaw) {
+      parseProxyPool(poolRaw, proxyProtocol);
+    }
+
+    saveConfigJson({
+      other: {
+        proxyProtocol,
+        disabledProxyPool: poolRaw,
+      },
+    });
+
+    dotenv.config({ override: true });
+    reloadConfig();
+
+    res.json({
+      success: true,
+      message: "禁用代理池已更新",
+      data: {
+        proxyProtocol,
+        poolRaw,
+        count: poolRaw ? parseProxyPool(poolRaw, proxyProtocol).length : 0,
+      },
+    });
+  } catch (error) {
+    logger.error("更新禁用代理池失败:", error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 });
