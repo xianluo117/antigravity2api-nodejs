@@ -11,20 +11,136 @@ import config, { getConfigJson, saveConfigJson } from "../config/config.js";
 import { reloadConfig } from "../utils/configReloader.js";
 import { deepMerge } from "../utils/deepMerge.js";
 import { parseEnvFile, updateEnvFile } from "../utils/envParser.js";
+import { httpRequest } from "../utils/httpClient.js";
 import ipBlockManager from "../utils/ipBlockManager.js";
 import logger from "../utils/logger.js";
 import memoryManager from "../utils/memoryManager.js";
 import { getEnvPath } from "../utils/paths.js";
 import {
   getProxyPoolSummary,
+  moveProxyToDisabledPool,
   normalizeProxyPoolInput,
   normalizeProxyProtocol,
   parseProxyPool,
 } from "../utils/proxyPool.js";
 
 const envPath = getEnvPath();
+const PROXY_TEST_TARGET_URL = "https://translate.google.com/?hl=zh-cn";
 
 const router = express.Router();
+
+function summarizeProxyTestError(error) {
+  if (!error) return "未知错误";
+  const upstreamStatus = error?.response?.status;
+  if (upstreamStatus) {
+    return `HTTP ${upstreamStatus}`;
+  }
+  return error.message || "请求失败";
+}
+
+function countProxyPoolEntries(poolRaw = "") {
+  const normalized = normalizeProxyPoolInput(poolRaw);
+  return normalized ? normalized.split("\n").length : 0;
+}
+
+async function testSingleProxyConnectivity({
+  proxyEntry,
+  proxyProtocol,
+  poolRaw,
+  disabledPoolRaw,
+}) {
+  const startedAt = Date.now();
+  const result = {
+    raw: proxyEntry.raw,
+    url: proxyEntry.url,
+    protocol: proxyEntry.protocol || proxyProtocol,
+    host: proxyEntry.host,
+    port: proxyEntry.port,
+    username: proxyEntry.username,
+    targetUrl: PROXY_TEST_TARGET_URL,
+    success: false,
+    status: null,
+    durationMs: 0,
+    autoDisabled: false,
+    disableResult: null,
+    message: "",
+  };
+
+  try {
+    const response = await httpRequest({
+      method: "GET",
+      url: PROXY_TEST_TARGET_URL,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
+      timeout: Math.min(Number(config.timeout) || 300000, 15000),
+      skipProxyAutoDisable: true,
+      proxy: {
+        enabled: true,
+        mode: "pool",
+        protocol: proxyProtocol,
+        poolRaw: proxyEntry.raw,
+        disabledPoolRaw: "",
+        url: null,
+      },
+      responseType: "text",
+      validateStatus: () => true,
+    });
+
+    result.status = response.status;
+    result.durationMs = Date.now() - startedAt;
+
+    if (response.status === 407) {
+      const disableResult = moveProxyToDisabledPool({
+        proxyEntry,
+        proxyProtocol,
+        poolRaw,
+        disabledPoolRaw,
+        persist: true,
+        reason: `代理测试返回 407: ${PROXY_TEST_TARGET_URL}`,
+      });
+      result.success = false;
+      result.autoDisabled = disableResult.changed === true;
+      result.disableResult = disableResult;
+      result.message = "代理认证失败(407)，已自动转移到禁用池";
+      return result;
+    }
+
+    if (response.status >= 200 && response.status < 400) {
+      result.success = true;
+      result.message = `连通成功 (HTTP ${response.status})`;
+      return result;
+    }
+
+    result.message = `连通失败 (HTTP ${response.status})`;
+    return result;
+  } catch (error) {
+    result.durationMs = Date.now() - startedAt;
+    result.status = error?.response?.status || null;
+    result.message = summarizeProxyTestError(error);
+
+    if (result.status === 407) {
+      const disableResult = moveProxyToDisabledPool({
+        proxyEntry,
+        proxyProtocol,
+        poolRaw,
+        disabledPoolRaw,
+        persist: true,
+        reason: `代理测试异常返回 407: ${PROXY_TEST_TARGET_URL}`,
+      });
+      result.autoDisabled = disableResult.changed === true;
+      result.disableResult = disableResult;
+      result.message = "代理认证失败(407)，已自动转移到禁用池";
+    }
+
+    return result;
+  }
+}
 
 // 禁用缓存中间件，确保管理后台数据实时性
 router.use((req, res, next) => {
@@ -939,6 +1055,78 @@ router.put("/proxy-pool/disabled", cookieAuthMiddleware, (req, res) => {
     });
   } catch (error) {
     logger.error("更新禁用代理池失败:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// 测试代理池连通性
+router.post("/proxy-pool/test", cookieAuthMiddleware, async (req, res) => {
+  try {
+    const currentJson = getConfigJson();
+    const proxyProtocol = normalizeProxyProtocol(
+      req.body?.proxyProtocol || currentJson.other?.proxyProtocol || "http",
+    );
+    const poolRaw = normalizeProxyPoolInput(
+      req.body?.poolRaw ?? currentJson.other?.proxyPool ?? "",
+    );
+    let disabledPoolRaw = normalizeProxyPoolInput(
+      req.body?.disabledPoolRaw ?? currentJson.other?.disabledProxyPool ?? "",
+    );
+
+    const entries = parseProxyPool(poolRaw, proxyProtocol);
+    if (entries.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "启用代理池为空，无法执行测试",
+      });
+    }
+
+    const results = [];
+    let workingPoolRaw = poolRaw;
+
+    for (const proxyEntry of entries) {
+      const testResult = await testSingleProxyConnectivity({
+        proxyEntry,
+        proxyProtocol,
+        poolRaw: workingPoolRaw,
+        disabledPoolRaw,
+      });
+
+      results.push(testResult);
+
+      if (testResult.disableResult?.changed) {
+        workingPoolRaw = testResult.disableResult.nextPoolRaw;
+        disabledPoolRaw = testResult.disableResult.nextDisabledPoolRaw;
+      }
+    }
+
+    const summary = {
+      tested: results.length,
+      success: results.filter((item) => item.success).length,
+      failed: results.filter((item) => !item.success).length,
+      autoDisabled: results.filter((item) => item.autoDisabled).length,
+      targetUrl: PROXY_TEST_TARGET_URL,
+      proxyProtocol,
+      remainingActiveCount: countProxyPoolEntries(workingPoolRaw),
+      disabledCount: countProxyPoolEntries(disabledPoolRaw),
+    };
+
+    logger.info(
+      `[ProxyPool] 代理测试完成: 共 ${summary.tested} 条，成功 ${summary.success} 条，失败 ${summary.failed} 条，自动禁用 ${summary.autoDisabled} 条`,
+    );
+
+    res.json({
+      success: true,
+      message: "代理池测试完成",
+      data: {
+        summary,
+        results,
+        poolRaw: workingPoolRaw,
+        disabledPoolRaw,
+      },
+    });
+  } catch (error) {
+    logger.error("代理池测试失败:", error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 });

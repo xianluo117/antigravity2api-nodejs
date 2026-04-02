@@ -122,6 +122,8 @@ export function buildAxiosRequestConfig({
   responseType,
   useChunked = false,
   proxy = null,
+  validateStatus,
+  skipProxyAutoDisable = false,
 }) {
   const effectiveProxy =
     proxy || (config.proxy?.allRequests ? config.proxy : null);
@@ -148,9 +150,13 @@ export function buildAxiosRequestConfig({
     maxContentLength: Infinity,
     maxBodyLength: Infinity,
     __selectedProxyConfig: proxyConfig || null,
+    __skipProxyAutoDisable: skipProxyAutoDisable === true,
   };
 
   if (responseType) axiosConfig.responseType = responseType;
+  if (typeof validateStatus === "function") {
+    axiosConfig.validateStatus = validateStatus;
+  }
 
   if (data !== null) {
     if (useChunked) {

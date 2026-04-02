@@ -783,6 +783,34 @@
                           placeholder="1.2.3.4:8080:username:password&#10;username:password@1.2.3.5:8081&#10;socks5://username:password@1.2.3.6:1080"
                         ></textarea>
                       </div>
+                      <div class="security-info">
+                        <p>
+                          可使用下方测试模块逐条检测代理连通性，测试目标为
+                          <code>https://translate.google.com/?hl=zh-cn</code>。
+                        </p>
+                      </div>
+                      <div
+                        class="config-actions"
+                        style="justify-content: flex-start"
+                      >
+                        <button
+                          type="button"
+                          class="btn btn-info"
+                          id="proxyPoolTestBtn"
+                          onclick="testProxyPool()"
+                        >
+                          🧪 测试代理池
+                        </button>
+                      </div>
+                      <div class="rotation-status" id="proxyTestSummary">
+                        <span class="rotation-label">测试状态:</span>
+                        <span id="proxyTestSummaryText">未开始测试</span>
+                      </div>
+                      <div id="proxyTestResults" class="blocked-ips-list">
+                        <div class="empty-state-small">
+                          点击“测试代理池”后展示逐条代理测试结果
+                        </div>
+                      </div>
                     </div>
 
                     <!-- 禁用代理池 -->

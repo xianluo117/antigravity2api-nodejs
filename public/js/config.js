@@ -93,6 +93,139 @@ function updateProxyPoolSummary() {
   summaryEl.textContent = `启用池 ${activeCount} 条 | 禁用池 ${disabledCount} 条`;
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function resetProxyTestResults() {
+  const summaryEl = document.getElementById("proxyTestSummaryText");
+  const resultsEl = document.getElementById("proxyTestResults");
+  if (summaryEl) {
+    summaryEl.textContent = "未开始测试";
+  }
+  if (resultsEl) {
+    resultsEl.innerHTML =
+      '<div class="empty-state-small">点击“测试代理池”后展示逐条代理测试结果</div>';
+  }
+}
+
+function renderProxyTestResults(payload) {
+  const summary = payload?.summary || {};
+  const results = Array.isArray(payload?.results) ? payload.results : [];
+  const form = document.getElementById("configForm");
+  const summaryEl = document.getElementById("proxyTestSummaryText");
+  const resultsEl = document.getElementById("proxyTestResults");
+
+  if (form) {
+    if (form.elements["PROXY_POOL"] && payload?.poolRaw !== undefined) {
+      form.elements["PROXY_POOL"].value = payload.poolRaw || "";
+    }
+    if (
+      form.elements["DISABLED_PROXY_POOL"] &&
+      payload?.disabledPoolRaw !== undefined
+    ) {
+      form.elements["DISABLED_PROXY_POOL"].value = payload.disabledPoolRaw || "";
+    }
+  }
+
+  updateProxyPoolSummary();
+
+  if (summaryEl) {
+    summaryEl.textContent = `目标 ${summary.targetUrl || "-"} | 共 ${summary.tested || 0} 条 | 成功 ${summary.success || 0} 条 | 失败 ${summary.failed || 0} 条 | 自动禁用 ${summary.autoDisabled || 0} 条`;
+  }
+
+  if (!resultsEl) return;
+
+  if (results.length === 0) {
+    resultsEl.innerHTML = '<div class="empty-state-small">暂无测试结果</div>';
+    return;
+  }
+
+  resultsEl.innerHTML = results
+    .map((item, index) => {
+      const statusText = item.status ? `HTTP ${item.status}` : "无状态码";
+      const badgeColor = item.success ? "#10b981" : "#ef4444";
+      const disabledBadge = item.autoDisabled
+        ? '<span style="display:inline-flex;margin-left:8px;padding:2px 8px;border-radius:999px;background:rgba(239,68,68,.16);color:#ef4444;font-size:12px;">已转入禁用池</span>'
+        : "";
+      return `
+        <div style="padding:12px;border-bottom:1px solid rgba(255,255,255,.08);">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div style="font-weight:600;word-break:break-all;">#${index + 1} ${escapeHtml(item.raw || item.url || "")}${disabledBadge}</div>
+            <span style="color:${badgeColor};font-weight:600;">${escapeHtml(item.success ? "连通成功" : "连通失败")}</span>
+          </div>
+          <div style="margin-top:6px;opacity:.9;word-break:break-all;">${escapeHtml(statusText)} | ${escapeHtml(String(item.durationMs || 0))} ms | ${escapeHtml(item.message || "")}</div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+async function testProxyPool() {
+  const form = document.getElementById("configForm");
+  const button = document.getElementById("proxyPoolTestBtn");
+  if (!form || !button) return;
+
+  const proxyPool = normalizeProxyPoolInput(form.elements["PROXY_POOL"]?.value || "");
+  const disabledProxyPool = normalizeProxyPoolInput(
+    form.elements["DISABLED_PROXY_POOL"]?.value || "",
+  );
+  const proxyProtocol = normalizeProxyProtocol(
+    form.elements["PROXY_PROTOCOL"]?.value || "http",
+  );
+
+  if (!proxyPool) {
+    showToast("启用代理池为空，无法执行测试", "warning");
+    return;
+  }
+
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "测试中...";
+
+  const summaryEl = document.getElementById("proxyTestSummaryText");
+  const resultsEl = document.getElementById("proxyTestResults");
+  if (summaryEl) {
+    summaryEl.textContent = "正在逐条测试代理，请稍候...";
+  }
+  if (resultsEl) {
+    resultsEl.innerHTML = '<div class="empty-state-small">正在测试代理连通性...</div>';
+  }
+
+  try {
+    const response = await authFetch("/admin/proxy-pool/test", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        proxyProtocol,
+        poolRaw: proxyPool,
+        disabledPoolRaw: disabledProxyPool,
+      }),
+    });
+    const data = await response.json();
+
+    if (!data.success) {
+      throw new Error(data.message || "代理池测试失败");
+    }
+
+    renderProxyTestResults(data.data || {});
+    showToast(data.message || "代理池测试完成", "success");
+  } catch (error) {
+    resetProxyTestResults();
+    showToast("代理池测试失败: " + error.message, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
 // 正规化换行符（用于比较）
 function normalizeNewlines(str) {
   return (str || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
@@ -334,6 +467,7 @@ async function loadConfig() {
       if (typeof loadWhitelistIPs === "function") {
         loadWhitelistIPs();
       }
+      resetProxyTestResults();
     }
   } catch (error) {
     showToast("加载配置失败: " + error.message, "error");

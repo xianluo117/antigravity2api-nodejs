@@ -88,6 +88,35 @@ function dedupeProxyEntries(entries = []) {
   });
 }
 
+function buildPoolOperationResult({
+  changed = false,
+  alreadyDisabled = false,
+  reason = "",
+  entry = null,
+  activeEntries = [],
+  disabledEntries = [],
+  activeCount = undefined,
+  disabledCount = undefined,
+  error = undefined,
+} = {}) {
+  return {
+    changed,
+    alreadyDisabled,
+    reason,
+    entry,
+    activeEntries,
+    disabledEntries,
+    nextPoolRaw: activeEntries.map((item) => item.raw).join("\n"),
+    nextDisabledPoolRaw: disabledEntries.map((item) => item.raw).join("\n"),
+    activeCount:
+      activeCount ?? (Array.isArray(activeEntries) ? activeEntries.length : 0),
+    disabledCount:
+      disabledCount ??
+      (Array.isArray(disabledEntries) ? disabledEntries.length : 0),
+    error,
+  };
+}
+
 function parseProxyUrl(proxyUrl) {
   const rawValue = String(proxyUrl).trim();
   if (!rawValue.includes("://")) {
@@ -367,54 +396,64 @@ export function getProxyPoolSummary(proxyConfig = undefined) {
   };
 }
 
-export function disableProxyInPool(proxyEntry, reason = "") {
-  try {
-    const targetIdentity = getProxyIdentity(proxyEntry);
-    if (!targetIdentity) {
-      return { changed: false, reason: "missing_proxy_identity" };
-    }
+export function moveProxyToDisabledPool({
+  proxyEntry,
+  proxyProtocol = "http",
+  poolRaw = "",
+  disabledPoolRaw = "",
+  persist = false,
+  reason = "",
+} = {}) {
+  const protocol = normalizeProxyProtocol(proxyProtocol);
+  const targetIdentity = getProxyIdentity(proxyEntry);
 
-    const currentJson = getConfigJson();
-    const protocol = normalizeProxyProtocol(
-      currentJson.other?.proxyProtocol ||
-        proxyEntry?.protocol ||
-        config.proxy?.protocol ||
-        "http",
-    );
-    const activeEntries = parseProxyPool(
-      normalizeProxyPoolInput(currentJson.other?.proxyPool || ""),
-      protocol,
-    );
-    const disabledEntries = parseProxyPool(
-      normalizeProxyPoolInput(currentJson.other?.disabledProxyPool || ""),
-      protocol,
-    );
+  if (!targetIdentity) {
+    return buildPoolOperationResult({
+      changed: false,
+      reason: "missing_proxy_identity",
+      activeEntries: parseProxyPool(normalizeProxyPoolInput(poolRaw), protocol),
+      disabledEntries: parseProxyPool(
+        normalizeProxyPoolInput(disabledPoolRaw),
+        protocol,
+      ),
+    });
+  }
 
-    const targetEntry = activeEntries.find(
+  const activeEntries = parseProxyPool(
+    normalizeProxyPoolInput(poolRaw),
+    protocol,
+  );
+  const disabledEntries = parseProxyPool(
+    normalizeProxyPoolInput(disabledPoolRaw),
+    protocol,
+  );
+
+  const targetEntry = activeEntries.find(
+    (entry) => getProxyIdentity(entry) === targetIdentity,
+  );
+
+  if (!targetEntry) {
+    const alreadyDisabled = disabledEntries.some(
       (entry) => getProxyIdentity(entry) === targetIdentity,
     );
+    return buildPoolOperationResult({
+      changed: false,
+      alreadyDisabled,
+      reason: alreadyDisabled ? "already_disabled" : "not_found_in_active_pool",
+      activeEntries,
+      disabledEntries,
+    });
+  }
 
-    if (!targetEntry) {
-      const alreadyDisabled = disabledEntries.some(
-        (entry) => getProxyIdentity(entry) === targetIdentity,
-      );
-      return {
-        changed: false,
-        alreadyDisabled,
-        reason: alreadyDisabled
-          ? "already_disabled"
-          : "not_found_in_active_pool",
-      };
-    }
+  const nextActiveEntries = activeEntries.filter(
+    (entry) => getProxyIdentity(entry) !== targetIdentity,
+  );
+  const nextDisabledEntries = dedupeProxyEntries([
+    ...disabledEntries,
+    targetEntry,
+  ]);
 
-    const nextActiveEntries = activeEntries.filter(
-      (entry) => getProxyIdentity(entry) !== targetIdentity,
-    );
-    const nextDisabledEntries = dedupeProxyEntries([
-      ...disabledEntries,
-      targetEntry,
-    ]);
-
+  if (persist) {
     saveConfigJson({
       other: {
         proxyProtocol: protocol,
@@ -426,24 +465,44 @@ export function disableProxyInPool(proxyEntry, reason = "") {
     });
 
     config.proxy = getProxyConfig(getConfigJson());
+  }
 
+  if (reason) {
     logger.warn(
-      `[ProxyPool] 代理已移入禁用池: ${targetEntry.url}${reason ? `，原因: ${reason}` : ""}`,
+      `[ProxyPool] 代理已移入禁用池: ${targetEntry.url}，原因: ${reason}`,
     );
+  }
 
-    return {
-      changed: true,
-      entry: targetEntry,
-      activeCount: nextActiveEntries.length,
-      disabledCount: nextDisabledEntries.length,
-    };
+  return buildPoolOperationResult({
+    changed: true,
+    entry: targetEntry,
+    activeEntries: nextActiveEntries,
+    disabledEntries: nextDisabledEntries,
+  });
+}
+
+export function disableProxyInPool(proxyEntry, reason = "") {
+  try {
+    const currentJson = getConfigJson();
+    return moveProxyToDisabledPool({
+      proxyEntry,
+      proxyProtocol:
+        currentJson.other?.proxyProtocol ||
+        proxyEntry?.protocol ||
+        config.proxy?.protocol ||
+        "http",
+      poolRaw: currentJson.other?.proxyPool || "",
+      disabledPoolRaw: currentJson.other?.disabledProxyPool || "",
+      persist: true,
+      reason,
+    });
   } catch (error) {
     logger.warn(`[ProxyPool] 自动禁用代理失败: ${error.message}`);
-    return {
+    return buildPoolOperationResult({
       changed: false,
       reason: "disable_failed",
       error: error.message,
-    };
+    });
   }
 }
 
