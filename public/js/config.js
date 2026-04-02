@@ -137,7 +137,7 @@ function renderProxyTestResults(payload) {
   updateProxyPoolSummary();
 
   if (summaryEl) {
-    summaryEl.textContent = `模式 ${summary.requestMode || "-"} | 目标 ${summary.targetUrl || "-"} | 并发 ${summary.concurrency || 1} 条 | 共 ${summary.tested || 0} 条 | 通过 ${summary.success || 0} 条 | 407禁用 ${summary.autoDisabled || 0} 条`;
+    summaryEl.textContent = `模式 ${summary.requestMode || "-"} | LLM接口 ${summary.targetUrl || "-"} | 并发 ${summary.concurrency || 1} 条 | 共 ${summary.tested || 0} 条 | 通过 ${summary.success || 0} 条 | 407禁用 ${summary.autoDisabled || 0} 条`;
   }
 
   if (!resultsEl) return;
@@ -195,7 +195,7 @@ async function testProxyPool() {
   const resultsEl = document.getElementById("proxyTestResults");
   if (summaryEl) {
     const mode = form.elements["USE_NATIVE_AXIOS"]?.checked ? "Axios" : "TLS";
-    summaryEl.textContent = `正在以 ${mode} 模式并发测试代理，请稍候...（同时最多 10 条，仅 407 视为代理失败）`;
+    summaryEl.textContent = `正在以 ${mode} 模式并发测试 LLM 请求链路，请稍候...（同时最多 10 条，不携带凭证，仅 407 视为代理失败）`;
   }
   if (resultsEl) {
     resultsEl.innerHTML =

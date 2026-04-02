@@ -785,15 +785,15 @@
                       </div>
                       <div class="security-info">
                         <p>
-                          可使用下方测试模块逐条检测代理连通性，测试目标为
-                          <code>https://translate.google.com/?hl=zh-cn</code>。
+                          可使用下方测试模块逐条检测代理连通性，测试会复用当前
+                          LLM 请求链路的非流式接口。
                         </p>
                         <p>
                           测试会跟随当前选择的请求模式（Axios/TLS），且不携带任何凭证；仅当代理层返回
                           <code>407</code>
                           时判定为代理失败并自动转入禁用池，Google 侧返回的
-                          <code>403</code>、参数错误、缺少 project
-                          等业务错误将视为代理已连通。
+                          <code>403</code>、<code>400</code>、参数错误、缺少
+                          project 等业务错误将视为代理已连通。
                         </p>
                       </div>
                       <div

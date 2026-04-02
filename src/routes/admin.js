@@ -28,7 +28,7 @@ import {
 } from "../utils/proxyPool.js";
 
 const envPath = getEnvPath();
-const PROXY_TEST_TARGET_URL = "https://translate.google.com/?hl=zh-cn";
+const PROXY_TEST_TARGET_MODEL = "gemini-2.5-flash";
 const PROXY_TEST_TIMEOUT = 15000;
 const PROXY_TEST_CONCURRENCY = 10;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -38,6 +38,37 @@ let proxyTestRequester = null;
 
 function getProxyTestModeLabel() {
   return config.useNativeAxios === true ? "Axios" : "TLS";
+}
+
+function getProxyTestTargetUrl() {
+  return config.api?.noStreamUrl || config.api?.url;
+}
+
+function buildProxyTestHeaders() {
+  return {
+    Host: config.api?.host,
+    "User-Agent": config.api?.userAgent || "antigravity/proxy-test",
+    "Content-Type": "application/json",
+    "Accept-Encoding": "gzip",
+  };
+}
+
+function buildProxyTestRequestBody() {
+  return {
+    project: "proxy-test",
+    requestId: `proxy-test-${Date.now()}`,
+    request: {
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      generationConfig: {
+        maxOutputTokens: 1,
+        candidateCount: 1,
+      },
+      sessionId: `proxy-test-session-${Date.now()}`,
+    },
+    model: PROXY_TEST_TARGET_MODEL,
+    userAgent: "antigravity",
+    requestType: "agent",
+  };
 }
 
 function getProxyTestRequester() {
@@ -97,6 +128,7 @@ async function runWithConcurrency(items, concurrency, worker) {
 async function testSingleProxyConnectivity({ proxyEntry, proxyProtocol }) {
   const startedAt = Date.now();
   const requestMode = getProxyTestModeLabel();
+  const targetUrl = getProxyTestTargetUrl();
   const result = {
     raw: proxyEntry.raw,
     url: proxyEntry.url,
@@ -104,7 +136,7 @@ async function testSingleProxyConnectivity({ proxyEntry, proxyProtocol }) {
     host: proxyEntry.host,
     port: proxyEntry.port,
     username: proxyEntry.username,
-    targetUrl: PROXY_TEST_TARGET_URL,
+    targetUrl,
     requestMode,
     success: false,
     status: null,
@@ -116,14 +148,8 @@ async function testSingleProxyConnectivity({ proxyEntry, proxyProtocol }) {
   };
 
   try {
-    const headers = {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-      Accept:
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-      "Cache-Control": "no-cache",
-      Pragma: "no-cache",
-    };
+    const headers = buildProxyTestHeaders();
+    const requestBody = buildProxyTestRequestBody();
     const proxyConfig = {
       enabled: true,
       mode: "pool",
@@ -136,25 +162,29 @@ async function testSingleProxyConnectivity({ proxyEntry, proxyProtocol }) {
 
     if (config.useNativeAxios === true) {
       response = await httpRequest({
-        method: "GET",
-        url: PROXY_TEST_TARGET_URL,
+        method: "POST",
+        url: targetUrl,
         headers,
         timeout: Math.min(Number(config.timeout) || 300000, PROXY_TEST_TIMEOUT),
         skipProxyAutoDisable: true,
         proxy: proxyConfig,
+        data: requestBody,
         responseType: "text",
         validateStatus: () => true,
       });
     } else {
       const requester = getProxyTestRequester();
-      response = await requester.antigravity_fetch(PROXY_TEST_TARGET_URL, {
-        method: "GET",
+      response = await requester.request({
+        method: "POST",
+        url: targetUrl,
         headers,
-        timeout_ms: Math.min(
-          Number(config.timeout) || 300000,
-          PROXY_TEST_TIMEOUT,
+        data: requestBody,
+        timeout: Math.ceil(
+          Math.min(Number(config.timeout) || 300000, PROXY_TEST_TIMEOUT) / 1000,
         ),
         proxy: proxyConfig,
+        responseType: "text",
+        validateStatus: () => true,
       });
     }
 
@@ -169,7 +199,7 @@ async function testSingleProxyConnectivity({ proxyEntry, proxyProtocol }) {
     }
 
     result.success = true;
-    result.message = `代理已连通 Google，上游返回 ${response.status}，按规则视为通过`;
+    result.message = `已通过代理打通 LLM 请求链路，上游返回 ${response.status}，按规则视为通过`;
     return result;
   } catch (error) {
     result.durationMs = Date.now() - startedAt;
@@ -1186,7 +1216,7 @@ router.post("/proxy-pool/test", cookieAuthMiddleware, async (req, res) => {
       autoDisabled: results.filter((item) => item.autoDisabled).length,
       concurrency: concurrencyLimit,
       requestMode: getProxyTestModeLabel(),
-      targetUrl: PROXY_TEST_TARGET_URL,
+      targetUrl: getProxyTestTargetUrl(),
       proxyProtocol,
       remainingActiveCount: countProxyPoolEntries(workingPoolRaw),
       disabledCount: countProxyPoolEntries(disabledPoolRaw),
