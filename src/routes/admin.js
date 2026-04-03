@@ -52,6 +52,7 @@ function getRotationTokenLabel(tokenId) {
 
 async function warmupAntigravityRotationQuotas() {
   const enabledTokens = [...tokenManager.tokens];
+  const successfulIndices = [];
 
   for (const token of enabledTokens) {
     let activeToken = token;
@@ -84,16 +85,28 @@ async function warmupAntigravityRotationQuotas() {
 
       const quotas = await getModelsWithQuotas(activeToken);
       quotaManager.updateQuota(tokenId, quotas);
+
+      const tokenIndex = tokenManager.tokens.findIndex(
+        (item) =>
+          item.tokenId === tokenId ||
+          item.refresh_token === activeToken.refresh_token,
+      );
+      if (tokenIndex >= 0 && Object.keys(quotas || {}).length > 0) {
+        successfulIndices.push(tokenIndex);
+      }
     } catch (error) {
       logger.warn(
         `[Rotation] 预热 Antigravity 凭证 ${getRotationTokenLabel(tokenId)} 额度失败: ${error.message}`,
       );
     }
   }
+
+  return successfulIndices;
 }
 
 async function warmupGeminiCliRotationQuotas() {
   const enabledTokens = [...geminicliTokenManager.tokens];
+  const successfulIndices = [];
 
   for (const token of enabledTokens) {
     let activeToken = token;
@@ -133,12 +146,23 @@ async function warmupGeminiCliRotationQuotas() {
 
       const quotas = await getGeminiCliQuotas(activeToken);
       quotaManager.updateQuota(tokenId, quotas);
+
+      const tokenIndex = geminicliTokenManager.tokens.findIndex(
+        (item) =>
+          item.tokenId === tokenId ||
+          item.refresh_token === activeToken.refresh_token,
+      );
+      if (tokenIndex >= 0 && Object.keys(quotas || {}).length > 0) {
+        successfulIndices.push(tokenIndex);
+      }
     } catch (error) {
       logger.warn(
         `[Rotation] 预热 Gemini CLI 凭证 ${getRotationTokenLabel(tokenId)} 额度失败: ${error.message}`,
       );
     }
   }
+
+  return successfulIndices;
 }
 
 function getProxyTestModeLabel() {
@@ -1511,10 +1535,13 @@ router.put("/rotation", cookieAuthMiddleware, async (req, res) => {
 
     await Promise.all([tokenManager.reload(), geminicliTokenManager.reload()]);
 
-    await Promise.all([
+    const [antigravityReadyIndices, geminicliReadyIndices] = await Promise.all([
       warmupAntigravityRotationQuotas(),
       warmupGeminiCliRotationQuotas(),
     ]);
+
+    tokenManager.randomizeRotationStart(antigravityReadyIndices);
+    geminicliTokenManager.randomizeRotationStart(geminicliReadyIndices);
 
     logger.info(
       `轮询策略已更新: ${strategy || "未变"}, 请求次数: ${requestCount || "未变"}`,

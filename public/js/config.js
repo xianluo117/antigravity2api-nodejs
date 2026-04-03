@@ -364,10 +364,13 @@ async function loadRotationStatus() {
             rotationData.progressGroups || {},
           )
             .map((group) => {
+              const tokenIdText = String(group.currentTokenId || "").trim();
               const mainText =
-                group.currentTokenId === null
+                group.currentPosition === null
                   ? "暂无可用凭证"
-                  : `当前凭证ID: <span style="word-break: break-all">${escapeHtml(group.currentTokenId)}</span>`;
+                  : tokenIdText
+                    ? `当前凭证ID: <span style="word-break: break-all">${escapeHtml(tokenIdText)}</span>`
+                    : "当前凭证ID: 初始化中";
               const metaLines = [
                 `池内序号: ${group.currentPosition === null ? "-" : `#${group.currentPosition}`}`,
                 `可选凭证: ${group.candidateCount}/${group.totalTokens}`,

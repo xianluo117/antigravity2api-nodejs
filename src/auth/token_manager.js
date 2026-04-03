@@ -1030,6 +1030,67 @@ class TokenManager {
   }
 
   /**
+   * 在初始化或切换策略后，随机选择一个起始凭证
+   * @param {number[]} [preferredIndices] - 优先使用的候选 token 下标
+   * @returns {number|null}
+   */
+  randomizeRotationStart(preferredIndices = []) {
+    if (this.tokens.length === 0) {
+      this.currentIndex = 0;
+      this.currentQuotaIndex = 0;
+      return null;
+    }
+
+    const normalizedPreferred = Array.from(
+      new Set(
+        (preferredIndices || []).filter(
+          (index) =>
+            Number.isInteger(index) && index >= 0 && index < this.tokens.length,
+        ),
+      ),
+    );
+
+    if (this.rotationStrategy === RotationStrategy.QUOTA_EXHAUSTED) {
+      this._rebuildAvailableQuotaTokens();
+      const quotaCandidates =
+        normalizedPreferred.length > 0
+          ? this.availableQuotaTokenIndices.filter((index) =>
+              normalizedPreferred.includes(index),
+            )
+          : [...this.availableQuotaTokenIndices];
+
+      const source =
+        quotaCandidates.length > 0
+          ? quotaCandidates
+          : [...this.availableQuotaTokenIndices];
+
+      if (source.length === 0) {
+        this.currentQuotaIndex = 0;
+        this.currentIndex = 0;
+        return null;
+      }
+
+      const targetTokenIndex =
+        source[Math.floor(Math.random() * source.length)] || source[0];
+      const listIndex =
+        this.availableQuotaTokenIndices.indexOf(targetTokenIndex);
+      this.currentQuotaIndex = listIndex >= 0 ? listIndex : 0;
+      this.currentIndex = targetTokenIndex;
+      return targetTokenIndex;
+    }
+
+    const source =
+      normalizedPreferred.length > 0
+        ? normalizedPreferred
+        : this.tokens.map((_, index) => index);
+
+    const targetTokenIndex =
+      source[Math.floor(Math.random() * source.length)] ?? source[0] ?? 0;
+    this.currentIndex = targetTokenIndex;
+    return targetTokenIndex;
+  }
+
+  /**
    * 获取轮询进度分组信息
    * @param {Record<string, {label: string, modelId: string}>} groups - 分组配置
    * @returns {Record<string, Object>}

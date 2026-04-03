@@ -693,6 +693,40 @@ class GeminiCliTokenManager {
   }
 
   /**
+   * 在初始化或切换策略后，随机选择一个起始凭证
+   * @param {number[]} [preferredIndices] - 优先使用的候选 token 下标
+   * @returns {number|null}
+   */
+  randomizeRotationStart(preferredIndices = []) {
+    if (this.tokens.length === 0) {
+      this.currentIndex = 0;
+      return null;
+    }
+
+    const source = Array.from(
+      new Set(
+        (preferredIndices && preferredIndices.length > 0
+          ? preferredIndices
+          : this.tokens.map((_, index) => index)
+        ).filter(
+          (index) =>
+            Number.isInteger(index) && index >= 0 && index < this.tokens.length,
+        ),
+      ),
+    );
+
+    if (source.length === 0) {
+      this.currentIndex = 0;
+      return null;
+    }
+
+    const targetTokenIndex =
+      source[Math.floor(Math.random() * source.length)] ?? source[0] ?? 0;
+    this.currentIndex = targetTokenIndex;
+    return targetTokenIndex;
+  }
+
+  /**
    * 检查所有 token 对指定模型是否都不可用
    * @param {string} modelId - 模型 ID
    * @returns {boolean}
