@@ -595,6 +595,101 @@ class GeminiCliTokenManager {
   }
 
   /**
+   * 获取默认轮询策略下的起始索引（不修改内部状态）
+   * @returns {number}
+   * @private
+   */
+  _getDefaultStrategyStartIndex() {
+    const totalTokens = this.tokens.length;
+    if (totalTokens === 0) return 0;
+
+    let startIndex = this.currentIndex % totalTokens;
+
+    if (this.rotationStrategy === RotationStrategy.REQUEST_COUNT) {
+      const currentToken = this.tokens[startIndex];
+      const tokenKey = currentToken?.refresh_token;
+      const count = tokenKey ? this.tokenRequestCounts.get(tokenKey) || 0 : 0;
+
+      if (tokenKey && count >= this.requestCountPerToken) {
+        startIndex = (startIndex + 1) % totalTokens;
+      }
+    }
+
+    return startIndex;
+  }
+
+  /**
+   * 获取某个模型下当前轮询候选顺序
+   * @param {string|null} modelId - 模型 ID
+   * @returns {number[]}
+   * @private
+   */
+  _getOrderedCandidateIndices(modelId = null) {
+    if (this.tokens.length === 0) return [];
+
+    const totalTokens = this.tokens.length;
+    const startIndex = this._getDefaultStrategyStartIndex();
+    const candidateIndices = [];
+    for (let i = 0; i < totalTokens; i++) {
+      candidateIndices.push((startIndex + i) % totalTokens);
+    }
+
+    const allTokensExhausted = modelId
+      ? this._checkAllTokensExhaustedForModel(modelId)
+      : false;
+
+    if (modelId && !allTokensExhausted) {
+      return this._orderTokenCandidates(candidateIndices, modelId).map(
+        (item) => item.tokenIndex,
+      );
+    }
+
+    return candidateIndices;
+  }
+
+  /**
+   * 获取轮询进度分组信息
+   * @param {Record<string, {label: string, modelId: string}>} groups - 分组配置
+   * @returns {Record<string, Object>}
+   */
+  getRotationProgress(groups = {}) {
+    const progress = {};
+
+    Object.entries(groups).forEach(([groupKey, groupConfig]) => {
+      const candidateIndices = this._getOrderedCandidateIndices(
+        groupConfig.modelId,
+      );
+      const tokenIndex =
+        candidateIndices.length > 0 ? candidateIndices[0] : null;
+      const token = tokenIndex !== null ? this.tokens[tokenIndex] : null;
+      const tokenKey = token?.refresh_token || null;
+      const currentRequestCount = tokenKey
+        ? this.tokenRequestCounts.get(tokenKey) || 0
+        : 0;
+
+      progress[groupKey] = {
+        label: groupConfig.label,
+        modelId: groupConfig.modelId,
+        currentIndex: tokenIndex,
+        currentPosition: tokenIndex === null ? null : tokenIndex + 1,
+        totalTokens: this.tokens.length,
+        candidateCount: candidateIndices.length,
+        currentRequestCount,
+        requestCountTarget:
+          this.rotationStrategy === RotationStrategy.REQUEST_COUNT
+            ? this.requestCountPerToken
+            : null,
+        remainingToSwitch:
+          this.rotationStrategy === RotationStrategy.REQUEST_COUNT
+            ? Math.max(0, this.requestCountPerToken - currentRequestCount)
+            : null,
+      };
+    });
+
+    return progress;
+  }
+
+  /**
    * 检查所有 token 对指定模型是否都不可用
    * @param {string} modelId - 模型 ID
    * @returns {boolean}
@@ -1720,6 +1815,7 @@ class GeminiCliTokenManager {
       strategy: this.rotationStrategy,
       requestCount: this.requestCountPerToken,
       currentIndex: this.currentIndex,
+      totalTokens: this.tokens.length,
       tokenCounts: Object.fromEntries(this.tokenRequestCounts),
     };
   }

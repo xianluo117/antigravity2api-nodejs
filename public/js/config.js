@@ -344,7 +344,6 @@ async function loadRotationStatus() {
     const response = await authFetch("/admin/rotation");
     const data = await response.json();
     if (data.success) {
-      const { strategy, requestCount, currentIndex } = data.data;
       const strategyNames = {
         round_robin: "均衡负载",
         quota_exhausted: "额度耗尽切换",
@@ -352,12 +351,59 @@ async function loadRotationStatus() {
       };
       const statusEl = document.getElementById("currentRotationInfo");
       if (statusEl) {
-        let statusText = `${strategyNames[strategy] || strategy}`;
-        if (strategy === "request_count") {
-          statusText += ` (每${requestCount}次)`;
-        }
-        statusText += ` | 当前索引: ${currentIndex}`;
-        statusEl.textContent = statusText;
+        const renderManagerCard = (title, rotationData) => {
+          if (!rotationData) return "";
+
+          let summary = `${strategyNames[rotationData.strategy] || rotationData.strategy}`;
+          if (rotationData.strategy === "request_count") {
+            summary += ` · 每凭证 ${rotationData.requestCount} 次`;
+          }
+          summary += ` · 启用凭证 ${rotationData.totalTokens || 0} 个`;
+
+          const progressGroups = Object.values(
+            rotationData.progressGroups || {},
+          )
+            .map((group) => {
+              const mainText =
+                group.currentPosition === null
+                  ? "暂无可用凭证"
+                  : `当前凭证 #${group.currentPosition}`;
+              const metaLines = [
+                `可选凭证: ${group.candidateCount}/${group.totalTokens}`,
+              ];
+
+              if (group.requestCountTarget) {
+                metaLines.push(
+                  `请求进度: ${group.currentRequestCount}/${group.requestCountTarget}`,
+                );
+                metaLines.push(`剩余切换: ${group.remainingToSwitch}`);
+              }
+
+              return `
+                <div class="rotation-progress-item">
+                  <div class="rotation-progress-name">${group.label}</div>
+                  <div class="rotation-progress-main">${mainText}</div>
+                  <div class="rotation-progress-meta">${metaLines.join("<br>")}</div>
+                </div>
+              `;
+            })
+            .join("");
+
+          return `
+            <div class="rotation-manager-card">
+              <div class="rotation-manager-title">${title}</div>
+              <div class="rotation-manager-summary">${summary}</div>
+              <div class="rotation-progress-grid">${progressGroups}</div>
+            </div>
+          `;
+        };
+
+        statusEl.innerHTML = `
+          <div class="rotation-manager-list">
+            ${renderManagerCard("Antigravity", data.data.antigravity)}
+            ${renderManagerCard("Gemini CLI", data.data.geminicli)}
+          </div>
+        `;
       }
     }
   } catch (error) {

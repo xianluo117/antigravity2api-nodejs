@@ -1421,7 +1421,7 @@ html.tab-logs .content {
 /* 轮询策略状态显示 */
 .rotation-status {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   background: rgba(8, 145, 178, 0.08);
@@ -1438,6 +1438,70 @@ html.tab-logs .content {
 #currentRotationInfo {
   color: var(--primary);
   font-weight: 600;
+  flex: 1;
+}
+
+.rotation-manager-list {
+  display: grid;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.rotation-manager-card {
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid rgba(8, 145, 178, 0.12);
+}
+
+.rotation-manager-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.rotation-manager-summary {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.6rem;
+}
+
+.rotation-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.5rem;
+}
+
+.rotation-progress-item {
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.6rem 0.7rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.rotation-progress-name {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.2rem;
+}
+
+.rotation-progress-main {
+  font-size: 0.72rem;
+  color: var(--primary);
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+}
+
+.rotation-progress-meta {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
 }
 
 /* Toast通知 */

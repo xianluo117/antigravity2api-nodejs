@@ -32,6 +32,15 @@ const PROXY_TEST_TARGET_MODEL = "gemini-2.5-flash";
 const PROXY_TEST_TIMEOUT = 15000;
 const PROXY_TEST_CONCURRENCY = 10;
 const PROXY_TEST_MAX_CONCURRENCY = 100;
+const ANTIGRAVITY_ROTATION_GROUPS = {
+  claude: { label: "Claude", modelId: "claude-sonnet-4-6-thinking" },
+  gemini: { label: "Gemini", modelId: "gemini-2.5-flash" },
+  banana: { label: "Banana", modelId: "gemini-3.1-flash-image" },
+};
+const GEMINICLI_ROTATION_GROUPS = {
+  pro: { label: "Pro", modelId: "gemini-2.5-pro" },
+  flash: { label: "Flash", modelId: "gemini-2.5-flash" },
+};
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const router = express.Router();
@@ -1346,8 +1355,26 @@ router.post("/proxy-pool/test", cookieAuthMiddleware, async (req, res) => {
 // 获取轮询策略配置
 router.get("/rotation", cookieAuthMiddleware, (req, res) => {
   try {
-    const rotationConfig = tokenManager.getRotationConfig();
-    res.json({ success: true, data: rotationConfig });
+    const antigravityConfig = tokenManager.getRotationConfig();
+    const geminicliConfig = geminicliTokenManager.getRotationConfig();
+    res.json({
+      success: true,
+      data: {
+        ...antigravityConfig,
+        antigravity: {
+          ...antigravityConfig,
+          progressGroups: tokenManager.getRotationProgress(
+            ANTIGRAVITY_ROTATION_GROUPS,
+          ),
+        },
+        geminicli: {
+          ...geminicliConfig,
+          progressGroups: geminicliTokenManager.getRotationProgress(
+            GEMINICLI_ROTATION_GROUPS,
+          ),
+        },
+      },
+    });
   } catch (error) {
     logger.error("获取轮询配置失败:", error.message);
     res.status(500).json({ success: false, message: error.message });
@@ -1384,10 +1411,26 @@ router.put("/rotation", cookieAuthMiddleware, (req, res) => {
     logger.info(
       `轮询策略已更新: ${strategy || "未变"}, 请求次数: ${requestCount || "未变"}`,
     );
+    const antigravityConfig = tokenManager.getRotationConfig();
+    const geminicliConfig = geminicliTokenManager.getRotationConfig();
     res.json({
       success: true,
       message: "轮询策略已更新",
-      data: tokenManager.getRotationConfig(),
+      data: {
+        ...antigravityConfig,
+        antigravity: {
+          ...antigravityConfig,
+          progressGroups: tokenManager.getRotationProgress(
+            ANTIGRAVITY_ROTATION_GROUPS,
+          ),
+        },
+        geminicli: {
+          ...geminicliConfig,
+          progressGroups: geminicliTokenManager.getRotationProgress(
+            GEMINICLI_ROTATION_GROUPS,
+          ),
+        },
+      },
     });
   } catch (error) {
     logger.error("更新轮询配置失败:", error.message);
