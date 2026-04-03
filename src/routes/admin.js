@@ -1353,8 +1353,13 @@ router.post("/proxy-pool/test", cookieAuthMiddleware, async (req, res) => {
 });
 
 // 获取轮询策略配置
-router.get("/rotation", cookieAuthMiddleware, (req, res) => {
+router.get("/rotation", cookieAuthMiddleware, async (req, res) => {
   try {
+    await Promise.all([
+      tokenManager._ensureInitialized(),
+      geminicliTokenManager._ensureInitialized(),
+    ]);
+
     const antigravityConfig = tokenManager.getRotationConfig();
     const geminicliConfig = geminicliTokenManager.getRotationConfig();
     res.json({
@@ -1382,7 +1387,7 @@ router.get("/rotation", cookieAuthMiddleware, (req, res) => {
 });
 
 // 更新轮询策略配置
-router.put("/rotation", cookieAuthMiddleware, (req, res) => {
+router.put("/rotation", cookieAuthMiddleware, async (req, res) => {
   try {
     const { strategy, requestCount } = req.body;
 
@@ -1397,6 +1402,11 @@ router.put("/rotation", cookieAuthMiddleware, (req, res) => {
 
     // 更新内存中的配置
     tokenManager.updateRotationConfig(strategy, requestCount);
+
+    await Promise.all([
+      tokenManager._ensureInitialized(),
+      geminicliTokenManager._ensureInitialized(),
+    ]);
 
     // 保存到config.json
     const currentConfig = getConfigJson();
