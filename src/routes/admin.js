@@ -31,6 +31,7 @@ const envPath = getEnvPath();
 const PROXY_TEST_TARGET_MODEL = "gemini-2.5-flash";
 const PROXY_TEST_TIMEOUT = 15000;
 const PROXY_TEST_CONCURRENCY = 10;
+const PROXY_TEST_MAX_CONCURRENCY = 100;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const router = express.Router();
@@ -155,6 +156,14 @@ function buildProxyTestLogText(payload = {}) {
 function countProxyPoolEntries(poolRaw = "") {
   const normalized = normalizeProxyPoolInput(poolRaw);
   return normalized ? normalized.split("\n").length : 0;
+}
+
+function normalizeProxyTestConcurrency(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return PROXY_TEST_CONCURRENCY;
+  }
+  return Math.min(parsed, PROXY_TEST_MAX_CONCURRENCY);
 }
 
 async function runWithConcurrency(items, concurrency, worker) {
@@ -1232,6 +1241,9 @@ router.post("/proxy-pool/test", cookieAuthMiddleware, async (req, res) => {
     let disabledPoolRaw = normalizeProxyPoolInput(
       req.body?.disabledPoolRaw ?? currentJson.other?.disabledProxyPool ?? "",
     );
+    const concurrencyLimit = normalizeProxyTestConcurrency(
+      req.body?.concurrency,
+    );
 
     const entries = parseProxyPool(poolRaw, proxyProtocol);
     if (entries.length === 0) {
@@ -1241,7 +1253,6 @@ router.post("/proxy-pool/test", cookieAuthMiddleware, async (req, res) => {
       });
     }
 
-    const concurrencyLimit = PROXY_TEST_CONCURRENCY;
     let workingPoolRaw = poolRaw;
 
     const results = await runWithConcurrency(

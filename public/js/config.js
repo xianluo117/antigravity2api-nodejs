@@ -224,6 +224,10 @@ async function testProxyPool() {
   const proxyProtocol = normalizeProxyProtocol(
     form.elements["PROXY_PROTOCOL"]?.value || "http",
   );
+  const proxyTestConcurrency = Number.parseInt(
+    form.elements["PROXY_TEST_CONCURRENCY"]?.value || "10",
+    10,
+  );
 
   if (!proxyPool) {
     showToast("启用代理池为空，无法执行测试", "warning");
@@ -241,7 +245,7 @@ async function testProxyPool() {
   const resultsEl = document.getElementById("proxyTestResults");
   if (summaryEl) {
     const mode = form.elements["USE_NATIVE_AXIOS"]?.checked ? "Axios" : "TLS";
-    summaryEl.textContent = `正在以 ${mode} 模式并发测试 LLM 请求链路，请稍候...（同时最多 10 条，不携带凭证，仅 407 视为代理失败）`;
+    summaryEl.textContent = `正在以 ${mode} 模式并发测试 LLM 请求链路，请稍候...（当前并发上限 ${Number.isInteger(proxyTestConcurrency) && proxyTestConcurrency > 0 ? proxyTestConcurrency : 10} 条，不携带凭证，仅 407 视为代理失败）`;
   }
   if (resultsEl) {
     resultsEl.innerHTML =
@@ -258,6 +262,7 @@ async function testProxyPool() {
         proxyProtocol,
         poolRaw: proxyPool,
         disabledPoolRaw: disabledProxyPool,
+        concurrency: proxyTestConcurrency,
       }),
     });
     const data = await response.json();
