@@ -63,12 +63,14 @@ class TokenManager {
   async _initialize() {
     try {
       log.info("正在初始化token管理器...");
+      const salt = await this.store.getSalt();
       const tokenArray = await this.store.readAll();
 
       this.tokens = tokenArray
         .filter((token) => token.enable !== false)
         .map((token) => ({
           ...token,
+          tokenId: generateTokenId(token.refresh_token, salt),
           sessionId: generateSessionId(),
           instanceId: generateInstanceId(),
           deviceId: randomUUID(),
@@ -1051,6 +1053,7 @@ class TokenManager {
         label: groupConfig.label,
         modelId: groupConfig.modelId,
         currentIndex: tokenIndex,
+        currentTokenId: token?.tokenId || null,
         currentPosition: tokenIndex === null ? null : tokenIndex + 1,
         totalTokens: this.tokens.length,
         candidateCount: candidateIndices.length,

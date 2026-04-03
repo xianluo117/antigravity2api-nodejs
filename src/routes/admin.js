@@ -46,6 +46,101 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = express.Router();
 let proxyTestRequester = null;
 
+function getRotationTokenLabel(tokenId) {
+  return tokenId ? tokenId.slice(0, 12) : "unknown-token";
+}
+
+async function warmupAntigravityRotationQuotas() {
+  const enabledTokens = [...tokenManager.tokens];
+
+  for (const token of enabledTokens) {
+    let activeToken = token;
+    const tokenId =
+      activeToken.tokenId || (await tokenManager.getTokenId(activeToken));
+
+    if (!tokenId) continue;
+
+    try {
+      if (tokenManager.isExpired(activeToken)) {
+        activeToken = await tokenManager.refreshToken(activeToken, true);
+      }
+
+      if (!activeToken.projectId) {
+        await tokenManager.fetchProjectIdForToken(tokenId);
+        const refreshedToken = tokenManager.tokens.find(
+          (item) =>
+            item.tokenId === tokenId ||
+            item.refresh_token === activeToken.refresh_token,
+        );
+        activeToken = refreshedToken || activeToken;
+      }
+
+      if (!activeToken.projectId) {
+        logger.warn(
+          `[Rotation] Antigravity 凭证 ${getRotationTokenLabel(tokenId)} 缺少 projectId，跳过额度初始化`,
+        );
+        continue;
+      }
+
+      const quotas = await getModelsWithQuotas(activeToken);
+      quotaManager.updateQuota(tokenId, quotas);
+    } catch (error) {
+      logger.warn(
+        `[Rotation] 预热 Antigravity 凭证 ${getRotationTokenLabel(tokenId)} 额度失败: ${error.message}`,
+      );
+    }
+  }
+}
+
+async function warmupGeminiCliRotationQuotas() {
+  const enabledTokens = [...geminicliTokenManager.tokens];
+
+  for (const token of enabledTokens) {
+    let activeToken = token;
+    const tokenId =
+      activeToken.tokenId ||
+      (await geminicliTokenManager.getTokenId(activeToken));
+
+    if (!tokenId) continue;
+
+    try {
+      if (geminicliTokenManager.isExpired(activeToken)) {
+        activeToken = await geminicliTokenManager.refreshToken(
+          activeToken,
+          true,
+        );
+      }
+
+      if (!activeToken.projectId) {
+        await geminicliTokenManager.fetchProjectIdForTokenData(
+          activeToken,
+          tokenId,
+        );
+        const refreshedToken = geminicliTokenManager.tokens.find(
+          (item) =>
+            item.tokenId === tokenId ||
+            item.refresh_token === activeToken.refresh_token,
+        );
+        activeToken = refreshedToken || activeToken;
+      }
+
+      if (!activeToken.projectId) {
+        logger.warn(
+          `[Rotation] Gemini CLI 凭证 ${getRotationTokenLabel(tokenId)} 缺少 projectId，跳过额度初始化`,
+        );
+        continue;
+      }
+
+      const quotas = await getGeminiCliQuotas(activeToken);
+      quotaManager.updateQuota(tokenId, quotas);
+    } catch (error) {
+      logger.warn(
+        `[Rotation] 预热 Gemini CLI 凭证 ${getRotationTokenLabel(tokenId)} 额度失败: ${error.message}`,
+      );
+    }
+  }
+}
+
 function getProxyTestModeLabel() {
   return config.useNativeAxios === true ? "Axios" : "TLS";
 }
@@ -1402,11 +1497,7 @@ router.put("/rotation", cookieAuthMiddleware, async (req, res) => {
 
     // 更新内存中的配置
     tokenManager.updateRotationConfig(strategy, requestCount);
-
-    await Promise.all([
-      tokenManager._ensureInitialized(),
-      geminicliTokenManager._ensureInitialized(),
-    ]);
+    geminicliTokenManager.updateRotationConfig(strategy, requestCount);
 
     // 保存到config.json
     const currentConfig = getConfigJson();
@@ -1417,6 +1508,13 @@ router.put("/rotation", cookieAuthMiddleware, async (req, res) => {
 
     // 重载配置到内存
     reloadConfig();
+
+    await Promise.all([tokenManager.reload(), geminicliTokenManager.reload()]);
+
+    await Promise.all([
+      warmupAntigravityRotationQuotas(),
+      warmupGeminiCliRotationQuotas(),
+    ]);
 
     logger.info(
       `轮询策略已更新: ${strategy || "未变"}, 请求次数: ${requestCount || "未变"}`,

@@ -365,10 +365,11 @@ async function loadRotationStatus() {
           )
             .map((group) => {
               const mainText =
-                group.currentPosition === null
+                group.currentTokenId === null
                   ? "暂无可用凭证"
-                  : `当前凭证 #${group.currentPosition}`;
+                  : `当前凭证ID: <span style="word-break: break-all">${escapeHtml(group.currentTokenId)}</span>`;
               const metaLines = [
+                `池内序号: ${group.currentPosition === null ? "-" : `#${group.currentPosition}`}`,
                 `可选凭证: ${group.candidateCount}/${group.totalTokens}`,
               ];
 
