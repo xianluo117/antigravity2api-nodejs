@@ -1,9 +1,9 @@
-import fs from 'fs';
-import path from 'path';
-import { log } from '../utils/logger.js';
-import { getDataDir } from '../utils/paths.js';
-import { QUOTA_CACHE_TTL, QUOTA_CLEANUP_INTERVAL } from '../constants/index.js';
-import { getGroupKey } from '../utils/modelGroups.js';
+import fs from "fs";
+import path from "path";
+import { QUOTA_CACHE_TTL, QUOTA_CLEANUP_INTERVAL } from "../constants/index.js";
+import { log } from "../utils/logger.js";
+import { getGroupKey } from "../utils/modelGroups.js";
+import { getDataDir } from "../utils/paths.js";
 
 // 每次请求消耗的额度百分比（按模型系列区分）
 const REQUEST_COST_PERCENT = 0.6667;
@@ -12,15 +12,15 @@ const REQUEST_COST_PERCENT = 0.6667;
 const GROUP_COST_PERCENT = {
   claude: 0.6667,
   gemini: 0.6667,
-  banana: 5.0,    // 图片生成模型消耗更高，约 20 次/满额
-  other: 0.6667
+  banana: 5.0, // 图片生成模型消耗更高，约 20 次/满额
+  other: 0.6667,
 };
 
 class QuotaManager {
   /**
    * @param {string} filePath - 额度数据文件路径
    */
-  constructor(filePath = path.join(getDataDir(), 'quotas.json')) {
+  constructor(filePath = path.join(getDataDir(), "quotas.json")) {
     this.filePath = filePath;
     /** @type {Map<string, {lastUpdated: number, models: Object, requestCounts: Object, resetTimes: Object}>} */
     this.cache = new Map();
@@ -38,13 +38,24 @@ class QuotaManager {
       fs.mkdirSync(dir, { recursive: true });
     }
     if (!fs.existsSync(this.filePath)) {
-      fs.writeFileSync(this.filePath, JSON.stringify({ meta: { lastCleanup: Date.now(), ttl: this.CLEANUP_INTERVAL }, quotas: {} }, null, 2), 'utf8');
+      fs.writeFileSync(
+        this.filePath,
+        JSON.stringify(
+          {
+            meta: { lastCleanup: Date.now(), ttl: this.CLEANUP_INTERVAL },
+            quotas: {},
+          },
+          null,
+          2,
+        ),
+        "utf8",
+      );
     }
   }
 
   loadFromFile() {
     try {
-      const data = fs.readFileSync(this.filePath, 'utf8');
+      const data = fs.readFileSync(this.filePath, "utf8");
       const parsed = JSON.parse(data);
       Object.entries(parsed.quotas || {}).forEach(([key, value]) => {
         // 确保 requestCounts 和 resetTimes 字段存在
@@ -53,7 +64,7 @@ class QuotaManager {
         this.cache.set(key, value);
       });
     } catch (error) {
-      log.error('加载额度文件失败:', error.message);
+      log.error("加载额度文件失败:", error.message);
     }
   }
 
@@ -65,11 +76,11 @@ class QuotaManager {
       });
       const data = {
         meta: { lastCleanup: Date.now(), ttl: this.CLEANUP_INTERVAL },
-        quotas
+        quotas,
       };
-      fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), 'utf8');
+      fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), "utf8");
     } catch (error) {
-      log.error('保存额度文件失败:', error.message);
+      log.error("保存额度文件失败:", error.message);
     }
   }
 
@@ -100,7 +111,10 @@ class QuotaManager {
       const groupKey = getGroupKey(modelId);
       const remaining = quotaData.r || 0;
 
-      if (groupMinRemaining[groupKey] === undefined || remaining < groupMinRemaining[groupKey]) {
+      if (
+        groupMinRemaining[groupKey] === undefined ||
+        remaining < groupMinRemaining[groupKey]
+      ) {
         groupMinRemaining[groupKey] = remaining;
       }
 
@@ -109,7 +123,10 @@ class QuotaManager {
         const newResetMs = Date.parse(resetTimeRaw);
 
         // 更新重置时间（取最早的）
-        if (!newResetTimes[groupKey] || newResetMs < Date.parse(newResetTimes[groupKey])) {
+        if (
+          !newResetTimes[groupKey] ||
+          newResetMs < Date.parse(newResetTimes[groupKey])
+        ) {
           newResetTimes[groupKey] = resetTimeRaw;
         }
       }
@@ -120,7 +137,10 @@ class QuotaManager {
       const groupKey = getGroupKey(modelId);
       const remaining = quotaData.r || 0;
 
-      if (existingGroupMinRemaining[groupKey] === undefined || remaining < existingGroupMinRemaining[groupKey]) {
+      if (
+        existingGroupMinRemaining[groupKey] === undefined ||
+        remaining < existingGroupMinRemaining[groupKey]
+      ) {
         existingGroupMinRemaining[groupKey] = remaining;
       }
     });
@@ -134,7 +154,8 @@ class QuotaManager {
       const oldResetMs = oldResetTimeRaw ? Date.parse(oldResetTimeRaw) : null;
 
       // 条件1: 旧的重置时间已经过去（说明进入了新的额度周期）
-      const resetTimePassed = oldResetMs && Number.isFinite(oldResetMs) && now > oldResetMs;
+      const resetTimePassed =
+        oldResetMs && Number.isFinite(oldResetMs) && now > oldResetMs;
 
       // 条件2: 新额度明显高于旧额度（说明额度确实恢复了）
       const quotaIncreased = oldMin !== undefined && newMin > oldMin + 0.05;
@@ -154,14 +175,16 @@ class QuotaManager {
 
     // 只有额度真正重置时才打印日志
     if (quotaResetGroups.size > 0) {
-      log.info(`[QuotaManager] 额度重置（重置时间已过），清零请求计数: ${Array.from(quotaResetGroups).join(', ')}`);
+      log.info(
+        `[QuotaManager] 额度重置（重置时间已过），清零请求计数: ${Array.from(quotaResetGroups).join(", ")}`,
+      );
     }
 
     this.cache.set(refreshToken, {
       lastUpdated: Date.now(),
       models: quotas,
       requestCounts: newRequestCounts,
-      resetTimes: newResetTimes
+      resetTimes: newResetTimes,
     });
     this.saveToFile();
   }
@@ -180,7 +203,7 @@ class QuotaManager {
         lastUpdated: Date.now(),
         models: {},
         requestCounts: {},
-        resetTimes: {}
+        resetTimes: {},
       };
       this.cache.set(refreshToken, data);
     }
@@ -230,38 +253,96 @@ class QuotaManager {
   }
 
   /**
+   * 获取模型组的有效请求计数（若已过重置时间则视为 0）
+   * @param {Object|null} data - token 对应的额度缓存
+   * @param {string} groupKey - 模型组 key
+   * @returns {number}
+   */
+  _getEffectiveRequestCount(data, groupKey) {
+    if (!data || !groupKey) return 0;
+
+    const resetTimeRaw = data.resetTimes?.[groupKey];
+    if (resetTimeRaw) {
+      const resetMs = Date.parse(resetTimeRaw);
+      if (Number.isFinite(resetMs) && Date.now() > resetMs) {
+        return 0;
+      }
+    }
+
+    return data.requestCounts?.[groupKey] || 0;
+  }
+
+  /**
+   * 获取 token 在指定模型组下的额度可用情况
+   * @param {string} tokenId - Token ID
+   * @param {string} modelId - 模型 ID
+   * @returns {{groupKey: string, hasData: boolean, remainingFraction: number, requestCount: number, estimatedRequests: number|null}}
+   */
+  getModelGroupAvailability(tokenId, modelId) {
+    const groupKey = getGroupKey(modelId);
+    const data = this.cache.get(tokenId);
+
+    if (!data || !data.models) {
+      return {
+        groupKey,
+        hasData: false,
+        remainingFraction: 1,
+        requestCount: 0,
+        estimatedRequests: null,
+      };
+    }
+
+    let minRemaining = 1;
+    let found = false;
+
+    for (const [id, quotaData] of Object.entries(data.models)) {
+      const idGroupKey = getGroupKey(id);
+      if (idGroupKey === groupKey) {
+        found = true;
+        const remaining = quotaData.r || 0;
+        if (remaining < minRemaining) {
+          minRemaining = remaining;
+        }
+      }
+    }
+
+    const requestCount = this._getEffectiveRequestCount(data, groupKey);
+    if (!found) {
+      return {
+        groupKey,
+        hasData: false,
+        remainingFraction: 1,
+        requestCount,
+        estimatedRequests: null,
+      };
+    }
+
+    return {
+      groupKey,
+      hasData: true,
+      remainingFraction: minRemaining,
+      requestCount,
+      estimatedRequests: this.calculateEstimatedRequests(
+        minRemaining,
+        requestCount,
+        groupKey,
+      ),
+    };
+  }
+
+  /**
    * 检查 token 对特定模型组是否有额度
    * @param {string} tokenId - Token ID
    * @param {string} modelId - 模型 ID
    * @returns {boolean} 是否有额度（true = 有额度或无数据，false = 额度为 0）
    */
   hasQuotaForModel(tokenId, modelId) {
-    const data = this.cache.get(tokenId);
-    if (!data || !data.models) {
-      // 没有额度数据，假设有额度
+    const availability = this.getModelGroupAvailability(tokenId, modelId);
+    if (!availability.hasData) {
       return true;
     }
 
-    const groupKey = getGroupKey(modelId);
-
-    // 使用该组的最小额度来判断（与 getModelGroupQuota 逻辑一致）
-    let minRemaining = null;
-
-    for (const [id, quotaData] of Object.entries(data.models)) {
-      const idGroupKey = getGroupKey(id);
-      if (idGroupKey === groupKey) {
-        const remaining = quotaData.r || 0;
-        if (minRemaining === null || remaining < minRemaining) {
-          minRemaining = remaining;
-        }
-      }
-    }
-
-    // 没有找到该组的模型数据，假设有额度
-    if (minRemaining === null) return true;
-
-    // 该组最小额度为 0，说明额度耗尽
-    return minRemaining > 0;
+    return (availability.estimatedRequests || 0) > 0;
   }
 
   /**
@@ -346,9 +427,14 @@ class QuotaManager {
    * @param {string} [groupKey] - 模型系列 key（用于获取对应的消耗率）
    * @returns {number} 预估剩余请求次数
    */
-  calculateEstimatedRequests(remainingFraction, requestCount = 0, groupKey = null) {
+  calculateEstimatedRequests(
+    remainingFraction,
+    requestCount = 0,
+    groupKey = null,
+  ) {
     // 根据模型系列使用不同的消耗率
-    const costPercent = (groupKey && GROUP_COST_PERCENT[groupKey]) || REQUEST_COST_PERCENT;
+    const costPercent =
+      (groupKey && GROUP_COST_PERCENT[groupKey]) || REQUEST_COST_PERCENT;
     // 基于当前阈值计算总的可用次数
     const percentageValue = remainingFraction * 100;
     const totalFromThreshold = Math.floor(percentageValue / costPercent);
@@ -385,7 +471,10 @@ class QuotaManager {
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
     }
-    this.cleanupTimer = setInterval(() => this.cleanup(), this.CLEANUP_INTERVAL);
+    this.cleanupTimer = setInterval(
+      () => this.cleanup(),
+      this.CLEANUP_INTERVAL,
+    );
     // 使用 unref 避免阻止进程退出
     this.cleanupTimer.unref?.();
   }
@@ -398,22 +487,21 @@ class QuotaManager {
   }
 
   convertToBeijingTime(utcTimeStr) {
-    if (!utcTimeStr) return 'N/A';
+    if (!utcTimeStr) return "N/A";
     try {
       const utcDate = new Date(utcTimeStr);
-      return utcDate.toLocaleString('zh-CN', {
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'Asia/Shanghai'
+      return utcDate.toLocaleString("zh-CN", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Asia/Shanghai",
       });
     } catch (error) {
-      return 'N/A';
+      return "N/A";
     }
   }
 }
 
 const quotaManager = new QuotaManager();
 export default quotaManager;
-

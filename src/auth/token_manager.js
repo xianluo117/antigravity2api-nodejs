@@ -678,6 +678,9 @@ class TokenManager {
     if (!token || !modelId) return;
 
     try {
+      if (token.refresh_token) {
+        this.incrementRequestCount(token.refresh_token);
+      }
       const salt = await this.store.getSalt();
       const tokenId = generateTokenId(token.refresh_token, salt);
       quotaManager.recordRequest(tokenId, modelId);
@@ -840,6 +843,126 @@ class TokenManager {
   }
 
   /**
+   * 获取 token 对指定模型的可用性详情
+   * @param {Object} token - Token 对象
+   * @param {string} modelId - 模型 ID
+   * @returns {{hasData: boolean, estimatedRequests: number|null, canUse: boolean, priority: number}}
+   * @private
+   */
+  _getTokenModelAvailability(token, modelId) {
+    if (!token || !modelId) {
+      return {
+        hasData: false,
+        estimatedRequests: null,
+        canUse: true,
+        priority: 0,
+      };
+    }
+
+    if (!this._isTokenAvailableForModel(token, modelId)) {
+      return {
+        hasData: true,
+        estimatedRequests: 0,
+        canUse: false,
+        priority: Number.MAX_SAFE_INTEGER,
+      };
+    }
+
+    try {
+      const salt = this.store._salt;
+      if (!salt) {
+        return {
+          hasData: false,
+          estimatedRequests: null,
+          canUse: true,
+          priority: 2,
+        };
+      }
+
+      const tokenId = generateTokenId(token.refresh_token, salt);
+      const availability = quotaManager.getModelGroupAvailability(
+        tokenId,
+        modelId,
+      );
+
+      if (!availability.hasData) {
+        return {
+          hasData: false,
+          estimatedRequests: null,
+          canUse: true,
+          priority: 2,
+        };
+      }
+
+      const estimatedRequests = availability.estimatedRequests || 0;
+      const requiredBudget =
+        this.rotationStrategy === RotationStrategy.REQUEST_COUNT
+          ? Math.max(1, this.requestCountPerToken)
+          : 1;
+
+      return {
+        hasData: true,
+        estimatedRequests,
+        canUse: estimatedRequests > 0,
+        priority: estimatedRequests >= requiredBudget ? 0 : 1,
+      };
+    } catch (error) {
+      return {
+        hasData: false,
+        estimatedRequests: null,
+        canUse: true,
+        priority: 2,
+      };
+    }
+  }
+
+  /**
+   * 基于模型可用次数构建候选 token 顺序
+   * 优先使用已知且对当前模型仍有可用次数的 token，其次再回退到无额度数据的 token。
+   * @param {number[]} candidateIndices - 候选 token 下标（已按轮询顺序展开）
+   * @param {string|null} modelId - 模型 ID
+   * @returns {Array<{ tokenIndex: number, availability: { hasData: boolean, estimatedRequests: number|null, canUse: boolean, priority: number } }>}
+   * @private
+   */
+  _orderTokenCandidates(candidateIndices, modelId = null) {
+    const ordered = candidateIndices
+      .map((tokenIndex, order) => ({
+        tokenIndex,
+        order,
+        availability: this._getTokenModelAvailability(
+          this.tokens[tokenIndex],
+          modelId,
+        ),
+      }))
+      .filter((item) => item.availability.canUse);
+
+    if (!modelId) {
+      return ordered;
+    }
+
+    const knownAvailable = ordered.filter((item) => item.availability.hasData);
+    const source = knownAvailable.length > 0 ? knownAvailable : ordered;
+
+    return source.sort((a, b) => {
+      if (a.availability.priority !== b.availability.priority) {
+        return a.availability.priority - b.availability.priority;
+      }
+
+      const aEstimated = a.availability.estimatedRequests;
+      const bEstimated = b.availability.estimatedRequests;
+      if (
+        aEstimated !== null &&
+        bEstimated !== null &&
+        aEstimated !== bEstimated
+      ) {
+        return bEstimated - aEstimated;
+      }
+
+      return a.order - b.order;
+    });
+  }
+
+  /**
    * 获取可用的 token
    * @param {string} [modelId] - 可选，请求的模型 ID，用于检查该模型的额度
    * @returns {Promise<Object|null>} token 对象
@@ -879,19 +1002,33 @@ class TokenManager {
     }
 
     const startIndex = this.currentQuotaIndex % totalAvailable;
+    const candidateIndices = [];
+    const quotaListIndices = new Map();
 
     for (let i = 0; i < totalAvailable; i++) {
       const listIndex = (startIndex + i) % totalAvailable;
       const tokenIndex = this.availableQuotaTokenIndices[listIndex];
-      const token = this.tokens[tokenIndex];
+      candidateIndices.push(tokenIndex);
+      quotaListIndices.set(tokenIndex, listIndex);
+    }
 
-      // 如果提供了 modelId 且不是所有 token 都耗尽，检查该 token 对该模型是否可用
-      if (modelId && !allTokensExhausted) {
-        if (!this._canUseTokenForModel(token, modelId)) {
-          // 该 token 对该模型不可用（额度为 0 或在冷却中），跳过
-          continue;
-        }
-      }
+    const candidateOrder =
+      modelId && !allTokensExhausted
+        ? this._orderTokenCandidates(candidateIndices, modelId)
+        : candidateIndices.map((tokenIndex) => ({
+            tokenIndex,
+            availability: {
+              hasData: false,
+              estimatedRequests: null,
+              canUse: true,
+              priority: 0,
+            },
+          }));
+
+    for (const candidate of candidateOrder) {
+      const tokenIndex = candidate.tokenIndex;
+      const token = this.tokens[tokenIndex];
+      const listIndex = quotaListIndices.get(tokenIndex) ?? 0;
 
       try {
         const result = await this._prepareToken(token);
@@ -938,7 +1075,22 @@ class TokenManager {
    */
   async _getTokenForDefaultStrategy(modelId = null) {
     const totalTokens = this.tokens.length;
-    const startIndex = this.currentIndex;
+    let startIndex = this.currentIndex;
+
+    if (
+      this.rotationStrategy === RotationStrategy.REQUEST_COUNT &&
+      totalTokens > 0
+    ) {
+      const currentToken = this.tokens[startIndex];
+      const tokenKey = currentToken?.refresh_token;
+      const count = tokenKey ? this.tokenRequestCounts.get(tokenKey) || 0 : 0;
+
+      if (tokenKey && count >= this.requestCountPerToken) {
+        this.resetRequestCount(tokenKey);
+        startIndex = (startIndex + 1) % totalTokens;
+        this.currentIndex = startIndex;
+      }
+    }
 
     // 如果提供了 modelId，先检查是否所有 token 对该模型的额度都为 0
     let allTokensExhausted = false;
@@ -946,17 +1098,27 @@ class TokenManager {
       allTokensExhausted = this._checkAllTokensExhaustedForModel(modelId);
     }
 
+    const candidateIndices = [];
     for (let i = 0; i < totalTokens; i++) {
-      const index = (startIndex + i) % totalTokens;
-      const token = this.tokens[index];
+      candidateIndices.push((startIndex + i) % totalTokens);
+    }
 
-      // 如果提供了 modelId 且不是所有 token 都耗尽，检查该 token 对该模型是否可用
-      if (modelId && !allTokensExhausted) {
-        if (!this._canUseTokenForModel(token, modelId)) {
-          // 该 token 对该模型不可用（额度为 0 或在冷却中），跳过
-          continue;
-        }
-      }
+    const candidateOrder =
+      modelId && !allTokensExhausted
+        ? this._orderTokenCandidates(candidateIndices, modelId)
+        : candidateIndices.map((tokenIndex) => ({
+            tokenIndex,
+            availability: {
+              hasData: false,
+              estimatedRequests: null,
+              canUse: true,
+              priority: 0,
+            },
+          }));
+
+    for (const candidate of candidateOrder) {
+      const index = candidate.tokenIndex;
+      const token = this.tokens[index];
 
       try {
         const result = await this._prepareToken(token);
@@ -969,17 +1131,9 @@ class TokenManager {
         // 更新当前索引
         this.currentIndex = index;
 
-        // 根据策略决定是否切换（仅 round_robin 策略每次切换）
+        // 根据策略决定是否切换（round_robin 每次切换，request_count 在下次获取前判断）
         if (this.rotationStrategy === RotationStrategy.ROUND_ROBIN) {
           this.currentIndex = (this.currentIndex + 1) % this.tokens.length;
-        } else if (this.rotationStrategy === RotationStrategy.REQUEST_COUNT) {
-          // 自定义次数策略：请求计数在 recordRequest 中处理，这里只处理切换逻辑
-          const tokenKey = token.refresh_token;
-          const count = this.tokenRequestCounts.get(tokenKey) || 0;
-          if (count >= this.requestCountPerToken) {
-            this.resetRequestCount(tokenKey);
-            this.currentIndex = (this.currentIndex + 1) % this.tokens.length;
-          }
         }
 
         return token;
@@ -1294,7 +1448,9 @@ class TokenManager {
 
       if (shouldRetryWithProjectId(status, errorText)) {
         try {
-          log.info("[Antigravity] 启动检测遇到 projectId 缺失，尝试自动获取后重试");
+          log.info(
+            "[Antigravity] 启动检测遇到 projectId 缺失，尝试自动获取后重试",
+          );
           const result = await this.fetchProjectId(token);
           if (result?.projectId) {
             token.projectId = result.projectId;

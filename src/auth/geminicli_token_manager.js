@@ -11,6 +11,8 @@ import { buildAxiosRequestConfig, httpRequest } from "../utils/httpClient.js";
 import { generateTokenId } from "../utils/idGenerator.js";
 import { log } from "../utils/logger.js";
 import { getDataDir } from "../utils/paths.js";
+import quotaManager from "./quota_manager.js";
+import tokenCooldownManager from "./token_cooldown_manager.js";
 import TokenStore from "./token_store.js";
 
 // Gemini CLI API 配置
@@ -394,6 +396,223 @@ class GeminiCliTokenManager {
   }
 
   /**
+   * 记录一次请求（用于 request_count 轮询及额度预估）
+   * @param {Object} token - Token 对象
+   * @param {string} modelId - 模型 ID
+   */
+  async recordRequest(token, modelId) {
+    if (!token?.refresh_token) return;
+
+    this.incrementRequestCount(token.refresh_token);
+
+    if (!modelId) return;
+
+    try {
+      const salt = await this.store.getSalt();
+      const tokenId = generateTokenId(token.refresh_token, salt);
+      quotaManager.recordRequest(tokenId, modelId);
+    } catch (error) {
+      log.warn("[GeminiCLI] 记录请求次数失败:", error.message);
+    }
+  }
+
+  /**
+   * 检查 token 对指定模型是否有额度
+   * @param {Object} token - Token 对象
+   * @param {string} modelId - 模型 ID
+   * @returns {boolean}
+   * @private
+   */
+  _hasQuotaForModel(token, modelId) {
+    if (!token || !modelId) return true;
+
+    try {
+      const salt = this.store._salt;
+      if (!salt) return true;
+
+      const tokenId = generateTokenId(token.refresh_token, salt);
+      return quotaManager.hasQuotaForModel(tokenId, modelId);
+    } catch (error) {
+      return true;
+    }
+  }
+
+  /**
+   * 检查 token 对指定模型是否在冷却中
+   * @param {Object} token - Token 对象
+   * @param {string} modelId - 模型 ID
+   * @returns {boolean}
+   * @private
+   */
+  _isTokenAvailableForModel(token, modelId) {
+    if (!token || !modelId) return true;
+
+    try {
+      const salt = this.store._salt;
+      if (!salt) return true;
+
+      const tokenId = generateTokenId(token.refresh_token, salt);
+      return tokenCooldownManager.isAvailable(tokenId, modelId);
+    } catch (error) {
+      return true;
+    }
+  }
+
+  /**
+   * 检查 token 对指定模型是否可用
+   * @param {Object} token - Token 对象
+   * @param {string} modelId - 模型 ID
+   * @returns {boolean}
+   * @private
+   */
+  _canUseTokenForModel(token, modelId) {
+    if (!token || !modelId) return true;
+
+    if (!this._isTokenAvailableForModel(token, modelId)) {
+      return false;
+    }
+
+    return this._hasQuotaForModel(token, modelId);
+  }
+
+  /**
+   * 获取 token 对指定模型的可用性详情
+   * @param {Object} token - Token 对象
+   * @param {string} modelId - 模型 ID
+   * @returns {{hasData: boolean, estimatedRequests: number|null, canUse: boolean, priority: number}}
+   * @private
+   */
+  _getTokenModelAvailability(token, modelId) {
+    if (!token || !modelId) {
+      return {
+        hasData: false,
+        estimatedRequests: null,
+        canUse: true,
+        priority: 0,
+      };
+    }
+
+    if (!this._isTokenAvailableForModel(token, modelId)) {
+      return {
+        hasData: true,
+        estimatedRequests: 0,
+        canUse: false,
+        priority: Number.MAX_SAFE_INTEGER,
+      };
+    }
+
+    try {
+      const salt = this.store._salt;
+      if (!salt) {
+        return {
+          hasData: false,
+          estimatedRequests: null,
+          canUse: true,
+          priority: 2,
+        };
+      }
+
+      const tokenId = generateTokenId(token.refresh_token, salt);
+      const availability = quotaManager.getModelGroupAvailability(
+        tokenId,
+        modelId,
+      );
+
+      if (!availability.hasData) {
+        return {
+          hasData: false,
+          estimatedRequests: null,
+          canUse: true,
+          priority: 2,
+        };
+      }
+
+      const estimatedRequests = availability.estimatedRequests || 0;
+      const requiredBudget =
+        this.rotationStrategy === RotationStrategy.REQUEST_COUNT
+          ? Math.max(1, this.requestCountPerToken)
+          : 1;
+
+      return {
+        hasData: true,
+        estimatedRequests,
+        canUse: estimatedRequests > 0,
+        priority: estimatedRequests >= requiredBudget ? 0 : 1,
+      };
+    } catch (error) {
+      return {
+        hasData: false,
+        estimatedRequests: null,
+        canUse: true,
+        priority: 2,
+      };
+    }
+  }
+
+  /**
+   * 按模型可用次数调整候选 token 顺序
+   * @param {number[]} candidateIndices - 候选下标
+   * @param {string|null} modelId - 模型 ID
+   * @returns {Array<{ tokenIndex: number, availability: { hasData: boolean, estimatedRequests: number|null, canUse: boolean, priority: number } }>}
+   * @private
+   */
+  _orderTokenCandidates(candidateIndices, modelId = null) {
+    const ordered = candidateIndices
+      .map((tokenIndex, order) => ({
+        tokenIndex,
+        order,
+        availability: this._getTokenModelAvailability(
+          this.tokens[tokenIndex],
+          modelId,
+        ),
+      }))
+      .filter((item) => item.availability.canUse);
+
+    if (!modelId) {
+      return ordered;
+    }
+
+    const knownAvailable = ordered.filter((item) => item.availability.hasData);
+    const source = knownAvailable.length > 0 ? knownAvailable : ordered;
+
+    return source.sort((a, b) => {
+      if (a.availability.priority !== b.availability.priority) {
+        return a.availability.priority - b.availability.priority;
+      }
+
+      const aEstimated = a.availability.estimatedRequests;
+      const bEstimated = b.availability.estimatedRequests;
+      if (
+        aEstimated !== null &&
+        bEstimated !== null &&
+        aEstimated !== bEstimated
+      ) {
+        return bEstimated - aEstimated;
+      }
+
+      return a.order - b.order;
+    });
+  }
+
+  /**
+   * 检查所有 token 对指定模型是否都不可用
+   * @param {string} modelId - 模型 ID
+   * @returns {boolean}
+   * @private
+   */
+  _checkAllTokensExhaustedForModel(modelId) {
+    if (!modelId || this.tokens.length === 0) return false;
+
+    for (const token of this.tokens) {
+      if (this._canUseTokenForModel(token, modelId)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
    * 通过 loadCodeAssist API 获取 projectId 和 tier 信息
    *
    * 优先级链（参考 MD 文档第 6 节）：
@@ -721,15 +940,53 @@ class GeminiCliTokenManager {
    * 获取可用的 token
    * @returns {Promise<Object|null>} token 对象
    */
-  async getToken() {
+  async getToken(modelId = null) {
     await this._ensureInitialized();
     if (this.tokens.length === 0) return null;
 
     const totalTokens = this.tokens.length;
-    const startIndex = this.currentIndex;
+    let startIndex = this.currentIndex;
 
+    if (
+      this.rotationStrategy === RotationStrategy.REQUEST_COUNT &&
+      totalTokens > 0
+    ) {
+      const currentToken = this.tokens[startIndex];
+      const tokenKey = currentToken?.refresh_token;
+      const count = tokenKey ? this.tokenRequestCounts.get(tokenKey) || 0 : 0;
+
+      if (tokenKey && count >= this.requestCountPerToken) {
+        this.resetRequestCount(tokenKey);
+        startIndex = (startIndex + 1) % totalTokens;
+        this.currentIndex = startIndex;
+      }
+    }
+
+    let allTokensExhausted = false;
+    if (modelId) {
+      allTokensExhausted = this._checkAllTokensExhaustedForModel(modelId);
+    }
+
+    const candidateIndices = [];
     for (let i = 0; i < totalTokens; i++) {
-      const index = (startIndex + i) % totalTokens;
+      candidateIndices.push((startIndex + i) % totalTokens);
+    }
+
+    const candidateOrder =
+      modelId && !allTokensExhausted
+        ? this._orderTokenCandidates(candidateIndices, modelId)
+        : candidateIndices.map((tokenIndex) => ({
+            tokenIndex,
+            availability: {
+              hasData: false,
+              estimatedRequests: null,
+              canUse: true,
+              priority: 0,
+            },
+          }));
+
+    for (const candidate of candidateOrder) {
+      const index = candidate.tokenIndex;
       const token = this.tokens[index];
 
       try {
@@ -743,16 +1000,9 @@ class GeminiCliTokenManager {
         // 更新当前索引
         this.currentIndex = index;
 
-        // 根据策略决定是否切换
+        // 根据策略决定是否切换（round_robin 每次切换，request_count 在下次获取前判断）
         if (this.rotationStrategy === RotationStrategy.ROUND_ROBIN) {
           this.currentIndex = (this.currentIndex + 1) % this.tokens.length;
-        } else if (this.rotationStrategy === RotationStrategy.REQUEST_COUNT) {
-          const tokenKey = token.refresh_token;
-          const count = this.tokenRequestCounts.get(tokenKey) || 0;
-          if (count >= this.requestCountPerToken) {
-            this.resetRequestCount(tokenKey);
-            this.currentIndex = (this.currentIndex + 1) % this.tokens.length;
-          }
         }
 
         return token;
@@ -1445,6 +1695,23 @@ class GeminiCliTokenManager {
    */
   async getSalt() {
     return this.store.getSalt();
+  }
+
+  /**
+   * 根据 token 对象生成安全 tokenId
+   * @param {Object} token - Token 对象
+   * @returns {Promise<string|null>}
+   */
+  async getTokenId(token) {
+    if (!token?.refresh_token) return null;
+    try {
+      const salt = await this.store.getSalt();
+      if (!salt) return null;
+      return generateTokenId(token.refresh_token, salt);
+    } catch (error) {
+      log.error(`[GeminiCLI] 生成tokenId失败: ${error.message}`);
+      return null;
+    }
   }
 
   // 获取当前轮询配置

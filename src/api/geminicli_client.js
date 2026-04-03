@@ -353,10 +353,11 @@ export async function generateNoStreamResponse(requestBody, token, model) {
 
 /**
  * 获取可用的 Token
+ * @param {string} [modelId] - 模型 ID
  * @returns {Promise<Object|null>} Token 对象
  */
-export async function getToken() {
-  return geminicliTokenManager.getToken();
+export async function getToken(modelId = null) {
+  return geminicliTokenManager.getToken(modelId);
 }
 
 /**
@@ -371,11 +372,10 @@ export function disableCurrentToken(token, reason) {
 /**
  * 记录请求（用于轮询策略）
  * @param {Object} token - Token 对象
+ * @param {string} [modelId] - 模型 ID
  */
-export function recordRequest(token) {
-  if (token && token.refresh_token) {
-    geminicliTokenManager.incrementRequestCount(token.refresh_token);
-  }
+export function recordRequest(token, modelId = null) {
+  geminicliTokenManager.recordRequest(token, modelId);
 }
 
 /**
