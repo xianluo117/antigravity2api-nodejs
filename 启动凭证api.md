@@ -1,6 +1,6 @@
 # 启动凭证 API 文档
 
-本文档说明按邮箱启动凭证的接口：[`POST /admin/oauth/enable-by-email`](src/routes/admin.js:1000)。
+本文档说明按邮箱启动凭证的接口：[`POST /admin/oauth/enable-by-email`](src/routes/admin.js:1047)。
 
 该接口可用于按邮箱启动对应的 `antigravity` 或 `geminicli` 凭证，并执行一次启用校验。
 
@@ -28,7 +28,7 @@
 
 对应实现位置：
 
-- 路由实现：[router.post("/oauth/enable-by-email")](src/routes/admin.js:1000)
+- 路由实现：[router.post("/oauth/enable-by-email")](src/routes/admin.js:1047)
 - Antigravity 启用校验：[enableTokenById()](src/auth/token_manager.js:1662)
 - Gemini CLI 启用校验：[enableTokenById()](src/auth/geminicli_token_manager.js:1616)
 
@@ -54,7 +54,11 @@ Content-Type: application/json
 
 ### mode 说明
 
-- `auto`：默认值，优先尝试 `antigravity`，若没找到再尝试 `geminicli`
+- `auto`：默认值，按以下顺序执行：
+  1. 先查找并启动 `antigravity`
+  2. 若 `antigravity` 启动成功，且存在对应 `geminicli` 凭证，则继续启动 `geminicli`
+  3. 若 `antigravity` 启动失败，则不再继续启动 `geminicli`
+  4. 若未找到 `antigravity` 凭证，但找到了 `geminicli` 凭证，则照常启动 `geminicli`
 - `antigravity`：仅在 antigravity 凭证中查找并启动
 - `geminicli`：仅在 Gemini CLI 凭证中查找并启动
 - `cli`：`geminicli` 的别名
@@ -99,6 +103,15 @@ Content-Type: application/json
 
 接口本身不会直接把凭证强行设为启用，而是复用现有启用检测流程：
 
+### Auto 模式补充说明
+
+`auto` 模式不是“二选一”，而是带顺序的串行流程：
+
+- 如果存在 `antigravity` 凭证，则先启动它
+- 只有当 `antigravity` 启动成功时，才会继续启动对应的 `geminicli`
+- 如果 `antigravity` 启动失败，会直接返回失败，不再继续启动 CLI
+- 如果不存在 `antigravity`，但存在 `geminicli`，则仍会正常启动 CLI
+
 ### Antigravity 检测流程
 
 由 [enableTokenById()](src/auth/token_manager.js:1662) 执行：
@@ -121,7 +134,9 @@ Content-Type: application/json
 
 ---
 
-## 6. 成功返回示例
+## 6. 返回示例
+
+### 6.1 单模式成功返回示例
 
 ```json
 {
@@ -136,16 +151,65 @@ Content-Type: application/json
 }
 ```
 
+### 6.2 Auto 模式且 antigravity / CLI 都成功
+
+```json
+{
+  "success": true,
+  "message": "Antigravity 与 CLI 凭证均启动成功",
+  "data": {
+    "email": "user@example.com",
+    "mode": "auto",
+    "enable": true,
+    "antigravity": {
+      "source": "antigravity",
+      "tokenId": "token_ag_xxx",
+      "success": true,
+      "message": "Token启用成功"
+    },
+    "geminicli": {
+      "source": "geminicli",
+      "tokenId": "token_cli_xxx",
+      "success": true,
+      "message": "Token启用成功"
+    }
+  }
+}
+```
+
+### 6.3 Auto 模式仅启动 antigravity 成功
+
+```json
+{
+  "success": true,
+  "message": "Token启用成功",
+  "data": {
+    "email": "user@example.com",
+    "mode": "antigravity",
+    "enable": true,
+    "antigravity": {
+      "source": "antigravity",
+      "tokenId": "token_ag_xxx",
+      "success": true,
+      "message": "Token启用成功"
+    },
+    "geminicli": null
+  }
+}
+```
+
 ### 返回字段说明
 
-| 字段           | 说明                                                |
-| -------------- | --------------------------------------------------- |
-| `success`      | 是否成功                                            |
-| `message`      | 启用结果说明                                        |
-| `data.email`   | 命中的邮箱                                          |
-| `data.mode`    | 实际启用的来源，可能为 `antigravity` 或 `geminicli` |
-| `data.tokenId` | 命中的凭证 ID                                       |
-| `data.enable`  | 最终启用结果                                        |
+| 字段               | 说明                                                      |
+| ------------------ | --------------------------------------------------------- |
+| `success`          | 是否成功                                                  |
+| `message`          | 启用结果说明                                              |
+| `data.email`       | 命中的邮箱                                                |
+| `data.mode`        | 实际执行模式，可能为 `antigravity` / `geminicli` / `auto` |
+| `data.enable`      | 最终启用结果                                              |
+| `data.tokenId`     | 单模式返回时的命中凭证 ID                                 |
+| `data.antigravity` | auto 模式下 antigravity 的执行结果                        |
+| `data.geminicli`   | auto 模式下 CLI 的执行结果                                |
 
 ---
 
@@ -187,7 +251,7 @@ Content-Type: application/json
 }
 ```
 
-### 7.5 启用检测失败
+### 7.5 Auto 模式下 antigravity 启动失败
 
 ```json
 {
@@ -196,8 +260,40 @@ Content-Type: application/json
   "data": {
     "email": "user@example.com",
     "mode": "antigravity",
-    "tokenId": "token_xxx",
-    "enable": false
+    "enable": false,
+    "antigravity": {
+      "source": "antigravity",
+      "tokenId": "token_ag_xxx",
+      "success": false,
+      "message": "凭证不可用，API 测试失败(403): ..."
+    },
+    "geminicli": null
+  }
+}
+```
+
+### 7.6 Auto 模式下 antigravity 成功，但 CLI 启动失败
+
+```json
+{
+  "success": false,
+  "message": "凭证不可用，API 测试失败(403): ...",
+  "data": {
+    "email": "user@example.com",
+    "mode": "geminicli",
+    "enable": false,
+    "antigravity": {
+      "source": "antigravity",
+      "tokenId": "token_ag_xxx",
+      "success": true,
+      "message": "Token启用成功"
+    },
+    "geminicli": {
+      "source": "geminicli",
+      "tokenId": "token_cli_xxx",
+      "success": false,
+      "message": "凭证不可用，API 测试失败(403): ..."
+    }
   }
 }
 ```
@@ -207,5 +303,5 @@ Content-Type: application/json
 ## 8. 补充说明
 
 - 该接口适合外部程序自动化调用，不依赖前端页面。
-- 若使用 `auto` 模式且同邮箱同时存在于两边，优先命中 `antigravity`。
-- 若需要先获取 403 账号及对应 URL，可配合 [403api.md](403api.md) 中的 [`GET /admin/oauth/403-accounts`](src/routes/admin.js:947) 一起使用。
+- 若使用 `auto` 模式且同邮箱同时存在于两边，会先启动 `antigravity`，成功后再尝试启动 `geminicli`。
+- 若需要先获取 403 账号及对应 URL，可配合 [403api.md](403api.md) 中的 [`GET /admin/oauth/403-accounts`](src/routes/admin.js:951) 一起使用。

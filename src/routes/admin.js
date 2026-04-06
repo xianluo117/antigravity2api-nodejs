@@ -1066,47 +1066,119 @@ router.post("/oauth/enable-by-email", async (req, res) => {
   }
 
   try {
+    const runEnable = async (source, token) => {
+      const manager =
+        source === "antigravity" ? tokenManager : geminicliTokenManager;
+      const result = await manager.enableTokenById(token.id, {
+        stage: "manual",
+      });
+
+      return {
+        source,
+        tokenId: token.id,
+        success: result.success !== false,
+        message: result.message || "操作完成",
+      };
+    };
+
     const [antigravityTokens, geminicliTokens] = await Promise.all([
       tokenManager.getTokenList(),
       geminicliTokenManager.getTokenList(),
     ]);
 
-    const candidates = [];
-    if (mode === "auto" || mode === "antigravity") {
-      const token = findTokenByEmail(antigravityTokens, email);
-      if (token) {
-        candidates.push({ source: "antigravity", token });
-      }
-    }
-    if (mode === "auto" || mode === "geminicli" || mode === "cli") {
-      const token = findTokenByEmail(geminicliTokens, email);
-      if (token) {
-        candidates.push({ source: "geminicli", token });
-      }
-    }
+    const antigravityToken =
+      mode === "auto" || mode === "antigravity"
+        ? findTokenByEmail(antigravityTokens, email)
+        : null;
+    const geminicliToken =
+      mode === "auto" || mode === "geminicli" || mode === "cli"
+        ? findTokenByEmail(geminicliTokens, email)
+        : null;
 
-    if (candidates.length === 0) {
+    if (!antigravityToken && !geminicliToken) {
       return res.status(404).json({
         success: false,
         message: "未找到该邮箱对应的凭证",
       });
     }
 
-    const selected = candidates[0];
-    const manager =
-      selected.source === "antigravity" ? tokenManager : geminicliTokenManager;
-    const result = await manager.enableTokenById(selected.token.id, {
-      stage: "manual",
-    });
+    if (mode === "auto") {
+      if (antigravityToken) {
+        const antigravityResult = await runEnable(
+          "antigravity",
+          antigravityToken,
+        );
+
+        if (!antigravityResult.success) {
+          return res.json({
+            success: false,
+            message: antigravityResult.message,
+            data: {
+              email,
+              mode: "antigravity",
+              enable: false,
+              antigravity: antigravityResult,
+              geminicli: null,
+            },
+          });
+        }
+
+        if (geminicliToken) {
+          const geminicliResult = await runEnable("geminicli", geminicliToken);
+          return res.json({
+            success: geminicliResult.success,
+            message: geminicliResult.success
+              ? "Antigravity 与 CLI 凭证均启动成功"
+              : geminicliResult.message,
+            data: {
+              email,
+              mode: geminicliResult.success ? "auto" : "geminicli",
+              enable: geminicliResult.success,
+              antigravity: antigravityResult,
+              geminicli: geminicliResult,
+            },
+          });
+        }
+
+        return res.json({
+          success: true,
+          message: antigravityResult.message,
+          data: {
+            email,
+            mode: "antigravity",
+            enable: true,
+            antigravity: antigravityResult,
+            geminicli: null,
+          },
+        });
+      }
+
+      const geminicliResult = await runEnable("geminicli", geminicliToken);
+      return res.json({
+        success: geminicliResult.success,
+        message: geminicliResult.message,
+        data: {
+          email,
+          mode: "geminicli",
+          enable: geminicliResult.success,
+          antigravity: null,
+          geminicli: geminicliResult,
+        },
+      });
+    }
+
+    const selected = mode === "antigravity" ? antigravityToken : geminicliToken;
+    const selectedSource = mode === "antigravity" ? "antigravity" : "geminicli";
+    const result = await runEnable(selectedSource, selected);
 
     return res.json({
-      success: result.success !== false,
-      message: result.message || "操作完成",
+      success: result.success,
+      message: result.message,
       data: {
         email,
-        mode: selected.source,
-        tokenId: selected.token.id,
-        enable: result.success !== false,
+        mode: selectedSource,
+        tokenId: selected.id,
+        enable: result.success,
       },
     });
   } catch (error) {
