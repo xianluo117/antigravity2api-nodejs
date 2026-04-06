@@ -9,10 +9,11 @@
  * 这是 Gemini CLI 反代的入口，支持 OpenAI/Gemini/Claude 兼容的 API 格式
  */
 
-import { Router } from 'express';
-import { handleGeminiCliRequest } from '../server/handlers/geminicli.js';
-import logger from '../utils/logger.js';
-import config from '../config/config.js';
+import { Router } from "express";
+import config from "../config/config.js";
+import { handleGeminiCliRequest } from "../server/handlers/geminicli.js";
+import logger from "../utils/logger.js";
+import { getPrefixedGeminiCliModels } from "../utils/modelRouting.js";
 
 const router = Router();
 
@@ -23,10 +24,10 @@ const checkGeminiCliEnabled = (req, res, next) => {
   if (config.geminicli?.enabled === false) {
     return res.status(503).json({
       error: {
-        message: 'Gemini CLI 功能未启用',
-        type: 'service_unavailable',
-        code: 'geminicli_disabled'
-      }
+        message: "Gemini CLI 功能未启用",
+        type: "service_unavailable",
+        code: "geminicli_disabled",
+      },
     });
   }
   next();
@@ -36,71 +37,26 @@ const checkGeminiCliEnabled = (req, res, next) => {
 router.use(checkGeminiCliEnabled);
 
 /**
- * 生成 Gemini CLI 可用模型列表
- * 与 gcli2api 项目保持一致
- */
-function getGeminiCliModels() {
-  const baseModels = [
-    'gemini-2.5-pro',
-    'gemini-2.5-flash',
-    'gemini-3-pro-preview',
-    'gemini-3-flash-preview',
-    'gemini-3.1-pro-preview'
-  ];
-  
-  const models = [];
-  const featurePrefixes = ['', '假流式/', '流式抗截断/'];
-  const thinkingSuffixes = ['', '-maxthinking', '-nothinking'];
-  const searchSuffix = '-search';
-  
-  for (const baseModel of baseModels) {
-    for (const prefix of featurePrefixes) {
-      // 基础模型
-      models.push(`${prefix}${baseModel}`);
-      
-      // 带 thinking 后缀
-      for (const thinkingSuffix of thinkingSuffixes) {
-        if (thinkingSuffix) {
-          models.push(`${prefix}${baseModel}${thinkingSuffix}`);
-        }
-      }
-      
-      // 带 search 后缀
-      models.push(`${prefix}${baseModel}${searchSuffix}`);
-      
-      // 带 thinking + search 组合后缀
-      for (const thinkingSuffix of thinkingSuffixes) {
-        if (thinkingSuffix) {
-          models.push(`${prefix}${baseModel}${thinkingSuffix}${searchSuffix}`);
-        }
-      }
-    }
-  }
-  
-  return models;
-}
-
-/**
  * 返回模型列表（OpenAI 格式）
  */
 function handleModelsRequestOpenAI(req, res) {
   try {
     const created = Math.floor(Date.now() / 1000);
-    const models = getGeminiCliModels();
+    const models = getPrefixedGeminiCliModels();
 
     const modelList = {
-      object: 'list',
-      data: models.map(id => ({
+      object: "list",
+      data: models.map((id) => ({
         id,
-        object: 'model',
+        object: "model",
         created,
-        owned_by: 'google'
-      }))
+        owned_by: "google",
+      })),
     };
 
     res.json(modelList);
   } catch (error) {
-    logger.error('[GeminiCLI] 获取模型列表失败:', error.message);
+    logger.error("[GeminiCLI] 获取模型列表失败:", error.message);
     res.status(500).json({ error: error.message });
   }
 }
@@ -110,26 +66,26 @@ function handleModelsRequestOpenAI(req, res) {
  */
 function handleModelsRequestGemini(req, res) {
   try {
-    const models = getGeminiCliModels();
+    const models = getPrefixedGeminiCliModels();
 
     const modelList = {
-      models: models.map(id => ({
+      models: models.map((id) => ({
         name: `models/${id}`,
-        version: '001',
+        version: "001",
         displayName: id,
-        description: 'GeminiCLI model',
+        description: "GeminiCLI model",
         inputTokenLimit: 1048576,
         outputTokenLimit: 65536,
-        supportedGenerationMethods: ['generateContent', 'countTokens'],
+        supportedGenerationMethods: ["generateContent", "countTokens"],
         temperature: 1.0,
         topP: 0.95,
-        topK: 40
-      }))
+        topK: 40,
+      })),
     };
 
     res.json(modelList);
   } catch (error) {
-    logger.error('[GeminiCLI] 获取模型列表失败:', error.message);
+    logger.error("[GeminiCLI] 获取模型列表失败:", error.message);
     res.status(500).json({ error: error.message });
   }
 }
@@ -138,19 +94,21 @@ function handleModelsRequestGemini(req, res) {
  * GET /cli/v1/models
  * 获取可用模型列表（OpenAI 格式）
  */
-router.get('/v1/models', handleModelsRequestOpenAI);
+router.get("/v1/models", handleModelsRequestOpenAI);
 
 /**
  * GET /cli/v1beta/models
  * 获取可用模型列表（Gemini 格式）
  */
-router.get('/v1beta/models', handleModelsRequestGemini);
+router.get("/v1beta/models", handleModelsRequestGemini);
 
 /**
  * POST /cli/v1/chat/completions
  * 处理 OpenAI 格式的聊天补全请求
  */
-router.post('/v1/chat/completions', (req, res) => handleGeminiCliRequest(req, res, 'openai'));
+router.post("/v1/chat/completions", (req, res) =>
+  handleGeminiCliRequest(req, res, "openai"),
+);
 
 // ==================== Gemini 格式端点 ====================
 
@@ -162,7 +120,7 @@ router.post('/v1/chat/completions', (req, res) => handleGeminiCliRequest(req, re
 router.post(/^\/v1beta\/models\/(.+):generateContent$/, (req, res) => {
   // 将模型名称添加到请求体（解码 URL 编码的字符）
   req.body.model = decodeURIComponent(req.params[0]);
-  handleGeminiCliRequest(req, res, 'gemini');
+  handleGeminiCliRequest(req, res, "gemini");
 });
 
 /**
@@ -174,7 +132,7 @@ router.post(/^\/v1beta\/models\/(.+):streamGenerateContent$/, (req, res) => {
   // 将模型名称添加到请求体，并标记为流式（解码 URL 编码的字符）
   req.body.model = decodeURIComponent(req.params[0]);
   req.body._isStream = true; // 内部标记
-  handleGeminiCliRequest(req, res, 'gemini');
+  handleGeminiCliRequest(req, res, "gemini");
 });
 
 // ==================== Claude 格式端点 ====================
@@ -183,7 +141,9 @@ router.post(/^\/v1beta\/models\/(.+):streamGenerateContent$/, (req, res) => {
  * POST /cli/v1/messages
  * 处理 Claude 格式的消息请求
  */
-router.post('/v1/messages', (req, res) => handleGeminiCliRequest(req, res, 'claude'));
+router.post("/v1/messages", (req, res) =>
+  handleGeminiCliRequest(req, res, "claude"),
+);
 
 // ==================== 健康检查 ====================
 
@@ -191,12 +151,12 @@ router.post('/v1/messages', (req, res) => handleGeminiCliRequest(req, res, 'clau
  * GET /cli/health
  * 健康检查端点
  */
-router.get('/health', (req, res) => {
+router.get("/health", (req, res) => {
   res.json({
-    status: 'ok',
-    service: 'geminicli',
+    status: "ok",
+    service: "geminicli",
     enabled: config.geminicli?.enabled !== false,
-    supportedFormats: ['openai', 'gemini', 'claude']
+    supportedFormats: ["openai", "gemini", "claude"],
   });
 });
 

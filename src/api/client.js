@@ -14,6 +14,10 @@ import { saveBase64Image } from "../utils/imageStorage.js";
 import logger from "../utils/logger.js";
 import memoryManager from "../utils/memoryManager.js";
 import { buildRecordCodeAssistMetricsBody } from "../utils/recordCodeAssistMetrics.js";
+import {
+  getPrefixedGeminiCliModels,
+  toAntigravityPublicModelId,
+} from "../utils/modelRouting.js";
 import requesterManager from "../utils/requesterManager.js";
 import {
   isImageModel,
@@ -143,14 +147,22 @@ const DEFAULT_MODELS = Object.freeze([
 // 生成默认模型列表响应
 function getDefaultModelList() {
   const created = Math.floor(Date.now() / 1000);
+  const antigravityModels = DEFAULT_MODELS.map((id) => ({
+    id: toAntigravityPublicModelId(id),
+    object: "model",
+    created,
+    owned_by: "antigravity",
+  }));
+  const geminiCliModels = getPrefixedGeminiCliModels().map((id) => ({
+    id,
+    object: "model",
+    created,
+    owned_by: "geminicli",
+  }));
+
   return {
     object: "list",
-    data: DEFAULT_MODELS.map((id) => ({
-      id,
-      object: "model",
-      created,
-      owned_by: "google",
-    })),
+    data: [...antigravityModels, ...geminiCliModels],
   };
 }
 
@@ -337,21 +349,33 @@ export async function getAvailableModels() {
 
   const created = Math.floor(Date.now() / 1000);
   const modelList = Object.keys(data.models || {}).map((id) => ({
-    id,
+    id: toAntigravityPublicModelId(id),
     object: "model",
     created,
-    owned_by: "google",
+    owned_by: "antigravity",
   }));
 
   // 添加默认模型（如果 API 返回的列表中没有）
   const existingIds = new Set(modelList.map((m) => m.id));
   for (const defaultModel of DEFAULT_MODELS) {
-    if (!existingIds.has(defaultModel)) {
+    const publicModelId = toAntigravityPublicModelId(defaultModel);
+    if (!existingIds.has(publicModelId)) {
       modelList.push({
-        id: defaultModel,
+        id: publicModelId,
         object: "model",
         created,
-        owned_by: "google",
+        owned_by: "antigravity",
+      });
+    }
+  }
+
+  for (const cliModel of getPrefixedGeminiCliModels()) {
+    if (!existingIds.has(cliModel)) {
+      modelList.push({
+        id: cliModel,
+        object: "model",
+        created,
+        owned_by: "geminicli",
       });
     }
   }

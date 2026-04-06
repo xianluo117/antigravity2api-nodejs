@@ -11,9 +11,11 @@ import logger from '../../utils/logger.js';
 import config from '../../config/config.js';
 import tokenManager from '../../auth/token_manager.js';
 import quotaManager from '../../auth/quota_manager.js';
+import { isGeminiCliModel, stripPublicModelPrefix } from '../../utils/modelRouting.js';
 import { createClaudeResponse } from '../formatters/claude.js';
 import { validateIncomingChatRequest } from '../validators/chat.js';
 import { getSafeRetries } from './common/retry.js';
+import { handleGeminiCliRequest } from './geminicli.js';
 import {
   setStreamHeaders,
   createHeartbeat,
@@ -62,7 +64,14 @@ export const handleClaudeRequest = async (req, res, isStream) => {
       return res.status(400).json(buildClaudeErrorPayload({ message: 'model is required' }, 400));
     }
 
-    const token = await tokenManager.getToken(model);
+    if (isGeminiCliModel(model)) {
+      return handleGeminiCliRequest(req, res, 'claude');
+    }
+
+    const actualModel = stripPublicModelPrefix(model);
+    const responseModel = model;
+
+    const token = await tokenManager.getToken(actualModel);
     if (!token) {
       throw new Error('没有可用的token，请运行 npm run login 获取token');
     }
@@ -80,17 +89,17 @@ export const handleClaudeRequest = async (req, res, isStream) => {
     // 创建 with429Retry 选项
     const createRetryOptions = (prefix) => ({
       loggerPrefix: prefix,
-      onAttempt: () => tokenManager.recordRequest(token, model),
+      onAttempt: () => tokenManager.recordRequest(token, actualModel),
       tokenId,
-      modelId: model,
+      modelId: actualModel,
       refreshQuota
     });
 
     // 使用统一参数规范化模块处理 Claude 格式参数
     const parameters = normalizeClaudeParameters(rawParams);
 
-    const isImageModel = model.includes('-image');
-    const requestBody = generateClaudeRequestBody(messages, model, parameters, tools, system, token);
+    const isImageModel = actualModel.includes('-image');
+    const requestBody = generateClaudeRequestBody(messages, actualModel, parameters, tools, system, token);
 
     if (isImageModel) {
       prepareImageRequest(requestBody);
@@ -118,7 +127,7 @@ export const handleClaudeRequest = async (req, res, isStream) => {
             type: "message",
             role: "assistant",
             content: [],
-            model: model,
+            model: responseModel,
             stop_reason: null,
             stop_sequence: null,
             usage: { input_tokens: 0, output_tokens: 0 }
@@ -348,7 +357,7 @@ export const handleClaudeRequest = async (req, res, isStream) => {
         const stopReason = toolCalls.length > 0 ? 'tool_use' : 'end_turn';
         const response = createClaudeResponse(
           msgId,
-          model,
+          responseModel,
           content,
           reasoningContent || null,
           reasoningSignature,
@@ -379,7 +388,7 @@ export const handleClaudeRequest = async (req, res, isStream) => {
       const stopReason = toolCalls.length > 0 ? 'tool_use' : 'end_turn';
       const response = createClaudeResponse(
         msgId,
-        model,
+        responseModel,
         content,
         reasoningContent,
         reasoningSignature,
