@@ -84,6 +84,16 @@ function getRequestEmail(req) {
   return "";
 }
 
+function getRequestMode(req, defaultMode = "auto") {
+  if (typeof req.body?.mode === "string") {
+    return req.body.mode.trim().toLowerCase() || defaultMode;
+  }
+  if (typeof req.query?.mode === "string") {
+    return req.query.mode.trim().toLowerCase() || defaultMode;
+  }
+  return defaultMode;
+}
+
 function normalizeForbiddenMessage(value) {
   return String(value || "").replace(/\\\//g, "/");
 }
@@ -197,6 +207,7 @@ function buildForbiddenGoogleAccountList(
     items.push({
       email,
       url: match.authUrl,
+      enable: token.enable !== false,
     });
   }
 
@@ -338,6 +349,22 @@ async function buildBatchExportResults(tokenIds, findTokenById) {
   }
 
   return { results, tokens };
+}
+
+function findTokenByEmail(tokens, email) {
+  const normalizedEmail = String(email || "")
+    .trim()
+    .toLowerCase();
+  if (!normalizedEmail) return null;
+
+  return (
+    (Array.isArray(tokens) ? tokens : []).find(
+      (token) =>
+        String(token?.email || "")
+          .trim()
+          .toLowerCase() === normalizedEmail,
+    ) || null
+  );
 }
 
 function getRotationTokenLabel(tokenId) {
@@ -998,6 +1025,7 @@ router.get("/oauth/403-accounts", async (req, res) => {
         data: {
           email: matched.email,
           url: matched.url,
+          enable: matched.enable === true,
         },
       });
     }
@@ -1013,6 +1041,80 @@ router.get("/oauth/403-accounts", async (req, res) => {
   } catch (error) {
     logger.error("获取403账号认证URL列表失败:", error.message);
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post("/oauth/enable-by-email", async (req, res) => {
+  const password = getRequestPassword(req);
+  const email = String(getRequestEmail(req) || "").trim();
+  const mode = getRequestMode(req, "auto");
+
+  if (!password || !verifyPassword(password)) {
+    return res.status(403).json({ success: false, message: "密码验证失败" });
+  }
+
+  if (!email) {
+    return res.status(400).json({ success: false, message: "email必填" });
+  }
+
+  const validModes = new Set(["auto", "antigravity", "geminicli", "cli"]);
+  if (!validModes.has(mode)) {
+    return res.status(400).json({
+      success: false,
+      message: "mode仅支持 auto / antigravity / geminicli / cli",
+    });
+  }
+
+  try {
+    const [antigravityTokens, geminicliTokens] = await Promise.all([
+      tokenManager.getTokenList(),
+      geminicliTokenManager.getTokenList(),
+    ]);
+
+    const candidates = [];
+    if (mode === "auto" || mode === "antigravity") {
+      const token = findTokenByEmail(antigravityTokens, email);
+      if (token) {
+        candidates.push({ source: "antigravity", token });
+      }
+    }
+    if (mode === "auto" || mode === "geminicli" || mode === "cli") {
+      const token = findTokenByEmail(geminicliTokens, email);
+      if (token) {
+        candidates.push({ source: "geminicli", token });
+      }
+    }
+
+    if (candidates.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "未找到该邮箱对应的凭证",
+      });
+    }
+
+    const selected = candidates[0];
+    const manager =
+      selected.source === "antigravity" ? tokenManager : geminicliTokenManager;
+    const result = await manager.enableTokenById(selected.token.id, {
+      stage: "manual",
+    });
+
+    return res.json({
+      success: result.success !== false,
+      message: result.message || "操作完成",
+      data: {
+        email,
+        mode: selected.source,
+        tokenId: selected.token.id,
+        enable: result.success !== false,
+      },
+    });
+  } catch (error) {
+    logger.error("按邮箱启用凭证失败:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 });
 
