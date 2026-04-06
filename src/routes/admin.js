@@ -191,6 +191,139 @@ function buildForbiddenGoogleAccountList(
   };
 }
 
+function normalizeBatchTokenIds(tokenIds) {
+  if (!Array.isArray(tokenIds)) return [];
+  return Array.from(
+    new Set(
+      tokenIds.map((tokenId) => String(tokenId || "").trim()).filter(Boolean),
+    ),
+  );
+}
+
+function buildBatchResponsePayload(action, results, extra = {}) {
+  const list = Array.isArray(results) ? results : [];
+  const successCount = list.filter((item) => item.success).length;
+  const failCount = list.length - successCount;
+  return {
+    action,
+    total: list.length,
+    successCount,
+    failCount,
+    results: list,
+    ...extra,
+  };
+}
+
+async function refreshAntigravityQuotaByTokenId(tokenId) {
+  let tokenData = await tokenManager.findTokenById(tokenId);
+  if (!tokenData) {
+    throw new Error("Token不存在");
+  }
+  if (tokenData.enable === false) {
+    throw new Error("Token已禁用，无法刷新额度");
+  }
+
+  if (tokenManager.isExpired(tokenData)) {
+    tokenData = await tokenManager.refreshToken(tokenData);
+  }
+
+  if (!tokenData.projectId) {
+    await tokenManager.fetchProjectIdForToken(tokenId);
+    tokenData = await tokenManager.findTokenById(tokenId);
+  }
+
+  if (!tokenData?.projectId) {
+    throw new Error("缺少Project ID，无法刷新额度");
+  }
+
+  const quotas = await getModelsWithQuotas(tokenData);
+  quotaManager.updateQuota(tokenId, quotas);
+  return quotas;
+}
+
+async function refreshGeminiCliQuotaByTokenId(tokenId) {
+  let tokenData = await geminicliTokenManager.findTokenById(tokenId);
+  if (!tokenData) {
+    throw new Error("Token不存在");
+  }
+  if (tokenData.enable === false) {
+    throw new Error("Token已禁用，无法刷新额度");
+  }
+
+  if (geminicliTokenManager.isExpired(tokenData)) {
+    tokenData = await geminicliTokenManager.refreshToken(tokenData);
+  }
+
+  if (!tokenData.projectId) {
+    await geminicliTokenManager.fetchProjectIdForToken(tokenId);
+    tokenData = await geminicliTokenManager.findTokenById(tokenId);
+  }
+
+  const quotas = await getGeminiCliQuotas(tokenData);
+  quotaManager.updateQuota(tokenId, quotas);
+  return quotas;
+}
+
+function buildAntigravityExportData(tokens) {
+  return {
+    version: 1,
+    exportTime: new Date().toISOString(),
+    tokens: tokens.map((token) => ({
+      access_token: token.access_token,
+      refresh_token: token.refresh_token,
+      expires_in: token.expires_in,
+      timestamp: token.timestamp,
+      enable: token.enable,
+      projectId: token.projectId,
+      email: token.email,
+      hasQuota: token.hasQuota,
+      sub: token.sub,
+    })),
+  };
+}
+
+function buildGeminiCliExportData(tokens) {
+  return {
+    version: 1,
+    exportTime: new Date().toISOString(),
+    tokens: tokens.map((token) => ({
+      access_token: token.access_token,
+      refresh_token: token.refresh_token,
+      expires_in: token.expires_in,
+      timestamp: token.timestamp,
+      enable: token.enable,
+      email: token.email,
+      projectId: token.projectId,
+      tier: token.tier,
+    })),
+  };
+}
+
+async function buildBatchExportResults(tokenIds, findTokenById) {
+  const results = [];
+  const tokens = [];
+
+  for (const tokenId of tokenIds) {
+    try {
+      const token = await findTokenById(tokenId);
+      if (!token) {
+        results.push({ success: false, tokenId, message: "Token不存在" });
+        continue;
+      }
+      tokens.push(token);
+      results.push({ success: true, tokenId, message: "已加入导出列表" });
+    } catch (error) {
+      results.push({
+        success: false,
+        tokenId,
+        message: error.message || "导出失败",
+      });
+    }
+  }
+
+  return { results, tokens };
+}
+
 function getRotationTokenLabel(tokenId) {
   return tokenId ? tokenId.slice(0, 12) : "unknown-token";
 }
@@ -927,6 +1060,124 @@ router.post("/tokens/reload", cookieAuthMiddleware, async (req, res) => {
     res.json({ success: true, message: "Token已热重载" });
   } catch (error) {
     logger.error("热重载失败:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post("/tokens/batch", cookieAuthMiddleware, async (req, res) => {
+  const action = String(req.body?.action || "").trim();
+  const tokenIds = normalizeBatchTokenIds(req.body?.tokenIds);
+
+  if (!action) {
+    return res.status(400).json({ success: false, message: "action必填" });
+  }
+
+  if (tokenIds.length === 0) {
+    return res
+      .status(400)
+      .json({ success: false, message: "tokenIds不能为空" });
+  }
+
+  try {
+    if (action === "export") {
+      const { password } = req.body || {};
+      if (!password || !verifyPassword(password)) {
+        return res
+          .status(403)
+          .json({ success: false, message: "密码验证失败" });
+      }
+
+      const { results, tokens } = await buildBatchExportResults(
+        tokenIds,
+        (tokenId) => tokenManager.findTokenById(tokenId),
+      );
+      const payload = buildBatchResponsePayload(action, results, {
+        exportData: buildAntigravityExportData(tokens),
+      });
+
+      return res.json({
+        success: true,
+        message: `批量导出完成：成功 ${payload.successCount} 个，失败 ${payload.failCount} 个`,
+        data: payload,
+      });
+    }
+
+    const results = [];
+
+    for (const tokenId of tokenIds) {
+      try {
+        let result;
+
+        if (action === "enable") {
+          result = await tokenManager.enableTokenById(tokenId, {
+            stage: "manual",
+          });
+        } else if (action === "disable") {
+          const now = Date.now();
+          result = await tokenManager.updateTokenById(tokenId, {
+            enable: false,
+            disableReason: "手动批量禁用",
+            disableTime: now,
+            lastError: "手动批量禁用",
+            lastErrorTime: now,
+            lastErrorStage: "manual",
+          });
+        } else if (action === "fetch_project_id") {
+          const projectResult =
+            await tokenManager.fetchProjectIdForToken(tokenId);
+          result = {
+            success: true,
+            message: "Project ID获取成功",
+            projectId: projectResult.projectId,
+          };
+        } else if (action === "refresh_token") {
+          const refreshResult = await tokenManager.refreshTokenById(tokenId);
+          result = {
+            success: true,
+            message: "Token刷新成功",
+            data: refreshResult,
+          };
+        } else if (action === "refresh_quota") {
+          const quotas = await refreshAntigravityQuotaByTokenId(tokenId);
+          result = {
+            success: true,
+            message: "额度刷新成功",
+            modelCount: Object.keys(quotas || {}).length,
+          };
+        } else {
+          return res.status(400).json({
+            success: false,
+            message: `不支持的批量操作: ${action}`,
+          });
+        }
+
+        results.push({
+          tokenId,
+          success: result.success !== false,
+          message: result.message || "操作成功",
+          ...(result.projectId ? { projectId: result.projectId } : {}),
+          ...(result.data ? { data: result.data } : {}),
+          ...(result.modelCount !== undefined
+            ? { modelCount: result.modelCount }
+            : {}),
+        });
+      } catch (error) {
+        results.push({
+          tokenId,
+          success: false,
+          message: error.message || "操作失败",
+        });
+      }
+    }
+
+    const payload = buildBatchResponsePayload(action, results);
+    res.json({
+      success: true,
+      message: `批量操作完成：成功 ${payload.successCount} 个，失败 ${payload.failCount} 个`,
+      data: payload,
+    });
+  } catch (error) {
+    logger.error("批量操作Token失败:", error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -1915,6 +2166,131 @@ router.post(
       res.json({ success: true, message: "Gemini CLI Token已热重载" });
     } catch (error) {
       logger.error("[GeminiCLI] 热重载失败:", error.message);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
+);
+
+router.post(
+  "/geminicli/tokens/batch",
+  cookieAuthMiddleware,
+  async (req, res) => {
+    const action = String(req.body?.action || "").trim();
+    const tokenIds = normalizeBatchTokenIds(req.body?.tokenIds);
+
+    if (!action) {
+      return res.status(400).json({ success: false, message: "action必填" });
+    }
+
+    if (tokenIds.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "tokenIds不能为空" });
+    }
+
+    try {
+      if (action === "export") {
+        const { password } = req.body || {};
+        if (!password || !verifyPassword(password)) {
+          return res
+            .status(403)
+            .json({ success: false, message: "密码验证失败" });
+        }
+
+        const { results, tokens } = await buildBatchExportResults(
+          tokenIds,
+          (tokenId) => geminicliTokenManager.findTokenById(tokenId),
+        );
+        const payload = buildBatchResponsePayload(action, results, {
+          exportData: buildGeminiCliExportData(tokens),
+        });
+
+        return res.json({
+          success: true,
+          message: `批量导出完成：成功 ${payload.successCount} 个，失败 ${payload.failCount} 个`,
+          data: payload,
+        });
+      }
+
+      const results = [];
+
+      for (const tokenId of tokenIds) {
+        try {
+          let result;
+
+          if (action === "enable") {
+            result = await geminicliTokenManager.enableTokenById(tokenId, {
+              stage: "manual",
+            });
+          } else if (action === "disable") {
+            const now = Date.now();
+            result = await geminicliTokenManager.updateTokenById(tokenId, {
+              enable: false,
+              disableReason: "手动批量禁用",
+              disableTime: now,
+              lastError: "手动批量禁用",
+              lastErrorTime: now,
+              lastErrorStage: "manual",
+            });
+          } else if (action === "fetch_project_id") {
+            const projectResult =
+              await geminicliTokenManager.fetchProjectIdForToken(tokenId);
+            result = {
+              success: true,
+              message: "Project ID获取成功",
+              projectId: projectResult.projectId,
+              tier: projectResult.tier || null,
+            };
+          } else if (action === "refresh_token") {
+            const refreshResult =
+              await geminicliTokenManager.refreshTokenById(tokenId);
+            result = {
+              success: true,
+              message: "Token刷新成功",
+              data: refreshResult,
+            };
+          } else if (action === "refresh_quota") {
+            const quotas = await refreshGeminiCliQuotaByTokenId(tokenId);
+            result = {
+              success: true,
+              message: "额度刷新成功",
+              modelCount: Object.keys(quotas || {}).length,
+            };
+          } else {
+            return res.status(400).json({
+              success: false,
+              message: `不支持的批量操作: ${action}`,
+            });
+          }
+
+          results.push({
+            tokenId,
+            success: result.success !== false,
+            message: result.message || "操作成功",
+            ...(result.projectId ? { projectId: result.projectId } : {}),
+            ...(result.tier ? { tier: result.tier } : {}),
+            ...(result.data ? { data: result.data } : {}),
+            ...(result.modelCount !== undefined
+              ? { modelCount: result.modelCount }
+              : {}),
+          });
+        } catch (error) {
+          results.push({
+            tokenId,
+            success: false,
+            message: error.message || "操作失败",
+          });
+        }
+      }
+
+      const payload = buildBatchResponsePayload(action, results);
+      res.json({
+        success: true,
+        message: `批量操作完成：成功 ${payload.successCount} 个，失败 ${payload.failCount} 个`,
+        data: payload,
+      });
+    } catch (error) {
+      logger.error("批量操作Gemini CLI Token失败:", error.message);
       res.status(500).json({ success: false, message: error.message });
     }
   },

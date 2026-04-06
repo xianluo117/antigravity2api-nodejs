@@ -4,6 +4,7 @@ let cachedGeminiCliTokens = [];
 let currentGeminiCliFilter =
   localStorage.getItem("geminicliTokenFilter") || "all";
 let generatedGeminiCliOAuthUrls = [];
+let selectedGeminiCliTokenIds = new Set();
 
 // Gemini CLI OAuth 配置
 const GEMINICLI_CLIENT_ID =
@@ -17,6 +18,224 @@ const GEMINICLI_SCOPES = [
 let geminicliOauthPort = null;
 
 const GEMINICLI_QUOTA_CARD_ID_PREFIX = "geminicli";
+
+function getFilteredGeminiCliTokens(tokens = cachedGeminiCliTokens) {
+  if (currentGeminiCliFilter === "enabled") {
+    return tokens.filter((token) => token.enable);
+  }
+  if (currentGeminiCliFilter === "disabled") {
+    return tokens.filter((token) => !token.enable);
+  }
+  return tokens;
+}
+
+function syncSelectedGeminiCliTokenIds() {
+  const validIds = new Set(
+    (cachedGeminiCliTokens || []).map((token) => token.id),
+  );
+  selectedGeminiCliTokenIds = new Set(
+    [...selectedGeminiCliTokenIds].filter((tokenId) => validIds.has(tokenId)),
+  );
+}
+
+function updateGeminiCliBatchActionState() {
+  const countEl = document.getElementById("selectedGeminiCliTokenCount");
+  if (countEl) {
+    countEl.textContent = selectedGeminiCliTokenIds.size;
+  }
+
+  const filteredTokens = getFilteredGeminiCliTokens();
+  const hasFilteredTokens = filteredTokens.length > 0;
+  const allVisibleSelected =
+    hasFilteredTokens &&
+    filteredTokens.every((token) => selectedGeminiCliTokenIds.has(token.id));
+
+  const selectAllBtn = document.getElementById("geminicliSelectAllBtn");
+  if (selectAllBtn) {
+    selectAllBtn.textContent = allVisibleSelected
+      ? "☑️ 取消全选"
+      : "☑️ 全选当前";
+    selectAllBtn.disabled = !hasFilteredTokens;
+  }
+
+  const clearBtn = document.getElementById("geminicliClearSelectionBtn");
+  if (clearBtn) {
+    clearBtn.disabled = selectedGeminiCliTokenIds.size === 0;
+  }
+
+  document
+    .querySelectorAll("[data-geminicli-bulk-action]")
+    .forEach((button) => {
+      button.disabled = selectedGeminiCliTokenIds.size === 0;
+    });
+
+  const panel = document.getElementById("geminicliBulkPanel");
+  if (panel) {
+    panel.classList.toggle("is-empty", selectedGeminiCliTokenIds.size === 0);
+  }
+}
+
+function toggleGeminiCliTokenSelection(tokenId, checked, event) {
+  event?.stopPropagation?.();
+  if (checked) {
+    selectedGeminiCliTokenIds.add(tokenId);
+  } else {
+    selectedGeminiCliTokenIds.delete(tokenId);
+  }
+  renderGeminiCliTokens(cachedGeminiCliTokens);
+}
+
+function toggleSelectAllGeminiCliTokens() {
+  const filteredTokenIds = getFilteredGeminiCliTokens().map(
+    (token) => token.id,
+  );
+  const allSelected =
+    filteredTokenIds.length > 0 &&
+    filteredTokenIds.every((tokenId) => selectedGeminiCliTokenIds.has(tokenId));
+
+  if (allSelected) {
+    filteredTokenIds.forEach((tokenId) =>
+      selectedGeminiCliTokenIds.delete(tokenId),
+    );
+  } else {
+    filteredTokenIds.forEach((tokenId) =>
+      selectedGeminiCliTokenIds.add(tokenId),
+    );
+  }
+
+  renderGeminiCliTokens(cachedGeminiCliTokens);
+}
+
+function clearGeminiCliTokenSelection() {
+  if (selectedGeminiCliTokenIds.size === 0) return;
+  selectedGeminiCliTokenIds.clear();
+  renderGeminiCliTokens(cachedGeminiCliTokens);
+}
+
+function downloadGeminiCliExportPayload(payload, filenamePrefix) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${filenamePrefix}-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function executeGeminiCliBatchAction(action, options = {}) {
+  const tokenIds = [...selectedGeminiCliTokenIds];
+  if (tokenIds.length === 0) {
+    showToast("请先选择要操作的 CLI 凭证", "warning");
+    return null;
+  }
+
+  if (options.confirmMessage) {
+    const confirmed = await showConfirm(
+      options.confirmMessage,
+      options.confirmTitle || "批量操作确认",
+    );
+    if (!confirmed) return null;
+  }
+
+  let password = null;
+  if (options.requirePassword) {
+    password = await showPasswordPrompt(options.passwordPrompt);
+    if (!password) return null;
+  }
+
+  showLoading(options.loadingText || "正在批量处理...");
+  try {
+    const response = await authFetch("/admin/geminicli/tokens/batch", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ action, tokenIds, password }),
+    });
+
+    const data = await response.json();
+    hideLoading();
+
+    if (!data.success) {
+      showToast(data.message || "批量操作失败", "error");
+      return null;
+    }
+
+    const payload = data.data || {};
+    const hasFailure = Number(payload.failCount) > 0;
+    const toastType = hasFailure ? "warning" : "success";
+
+    if (action === "export") {
+      downloadGeminiCliExportPayload(
+        payload.exportData || { tokens: [] },
+        "geminicli-selected-export",
+      );
+      showToast(data.message || "导出成功", toastType);
+    } else {
+      showToast(data.message || "批量操作成功", toastType);
+    }
+
+    if (action === "refresh_quota" && typeof quotaCache !== "undefined") {
+      tokenIds.forEach((tokenId) =>
+        quotaCache.clear(getQuotaCacheKey(tokenId, "geminicli")),
+      );
+    }
+
+    selectedGeminiCliTokenIds.clear();
+    await loadGeminiCliTokens();
+    return payload;
+  } catch (error) {
+    hideLoading();
+    showToast(`批量操作失败: ${error.message}`, "error");
+    return null;
+  }
+}
+
+async function batchEnableSelectedGeminiCliTokens() {
+  await executeGeminiCliBatchAction("enable", {
+    confirmTitle: "批量启用确认",
+    confirmMessage: `确定要批量启用已选中的 ${selectedGeminiCliTokenIds.size} 个 CLI 凭证吗？\n系统会逐个验证凭证可用性。`,
+    loadingText: "正在批量验证并启用 CLI 凭证...",
+  });
+}
+
+async function batchDisableSelectedGeminiCliTokens() {
+  await executeGeminiCliBatchAction("disable", {
+    confirmTitle: "批量禁用确认",
+    confirmMessage: `确定要批量禁用已选中的 ${selectedGeminiCliTokenIds.size} 个 CLI 凭证吗？`,
+    loadingText: "正在批量禁用 CLI 凭证...",
+  });
+}
+
+async function batchFetchSelectedGeminiCliProjectIds() {
+  await executeGeminiCliBatchAction("fetch_project_id", {
+    loadingText: "正在批量获取 CLI Project ID...",
+  });
+}
+
+async function batchRefreshSelectedGeminiCliQuotas() {
+  await executeGeminiCliBatchAction("refresh_quota", {
+    loadingText: "正在批量刷新 CLI 额度...",
+  });
+}
+
+async function batchReloadSelectedGeminiCliTokens() {
+  await executeGeminiCliBatchAction("refresh_token", {
+    loadingText: "正在批量重载 CLI 凭证...",
+  });
+}
+
+async function batchExportSelectedGeminiCliTokens() {
+  await executeGeminiCliBatchAction("export", {
+    requirePassword: true,
+    passwordPrompt: "请输入管理员密码以导出选中的 CLI 凭证",
+    loadingText: "正在导出选中的 CLI 凭证...",
+  });
+}
 
 // 获取 Gemini CLI OAuth URL
 function generateGeminiCliOAuthPorts(count = 1) {
@@ -296,6 +515,7 @@ async function loadGeminiCliTokens() {
 // 渲染 Gemini CLI Token 列表
 function renderGeminiCliTokens(tokens) {
   cachedGeminiCliTokens = tokens;
+  syncSelectedGeminiCliTokenIds();
 
   document.getElementById("geminicliTotalTokens").textContent = tokens.length;
   document.getElementById("geminicliEnabledTokens").textContent = tokens.filter(
@@ -331,12 +551,14 @@ function renderGeminiCliTokens(tokens) {
                 <div class="empty-state-hint">${emptyHint}</div>
             </div>
         `;
+    updateGeminiCliBatchActionState();
     return;
   }
 
   tokenList.innerHTML = filteredTokens
     .map((token, index) => {
       const tokenId = token.id;
+      const isSelected = selectedGeminiCliTokenIds.has(tokenId);
       const cardId = `${GEMINICLI_QUOTA_CARD_ID_PREFIX}-${tokenId.substring(0, 8)}`;
       const originalIndex = cachedGeminiCliTokens.findIndex(
         (t) => t.id === token.id,
@@ -383,9 +605,12 @@ function renderGeminiCliTokens(tokens) {
                     : token.lastErrorStage || "";
 
       return `
-        <div class="token-card ${!token.enable ? "disabled" : ""}" id="geminicli-card-${escapeHtml(cardId)}">
+        <div class="token-card ${!token.enable ? "disabled" : ""} ${isSelected ? "selected" : ""}" id="geminicli-card-${escapeHtml(cardId)}">
             <div class="token-header">
                 <div class="token-header-left">
+                    <label class="token-select-wrap" title="选择此 CLI 凭证进行批量操作">
+                        <input type="checkbox" class="token-select-checkbox" ${isSelected ? "checked" : ""} onclick="toggleGeminiCliTokenSelection('${safeTokenId}', this.checked, event)">
+                    </label>
                     <span class="status ${token.enable ? "enabled" : "disabled"}">
                         ${token.enable ? "✅ 启用" : "❌ 禁用"}
                     </span>
@@ -442,6 +667,7 @@ function renderGeminiCliTokens(tokens) {
   });
 
   updateSensitiveInfoDisplay();
+  updateGeminiCliBatchActionState();
 }
 
 // 筛选 Gemini CLI Token

@@ -3,12 +3,222 @@
 let cachedTokens = [];
 let currentFilter = localStorage.getItem("tokenFilter") || "all"; // 'all', 'enabled', 'disabled'
 let skipAnimation = false; // 是否跳过动画
+let selectedTokenIds = new Set();
 
 // 移动端操作区手动收起/展开
 let actionBarCollapsed = localStorage.getItem("actionBarCollapsed") === "true";
 
 // 存储事件监听器引用，便于清理
 const eventListenerRegistry = new WeakMap();
+
+function getFilteredTokens(tokens = cachedTokens) {
+  if (currentFilter === "enabled") {
+    return tokens.filter((token) => token.enable);
+  }
+  if (currentFilter === "disabled") {
+    return tokens.filter((token) => !token.enable);
+  }
+  return tokens;
+}
+
+function syncSelectedTokenIds() {
+  const validIds = new Set((cachedTokens || []).map((token) => token.id));
+  selectedTokenIds = new Set(
+    [...selectedTokenIds].filter((tokenId) => validIds.has(tokenId)),
+  );
+}
+
+function updateTokenBatchActionState() {
+  const countEl = document.getElementById("selectedTokenCount");
+  if (countEl) {
+    countEl.textContent = selectedTokenIds.size;
+  }
+
+  const filteredTokens = getFilteredTokens();
+  const hasFilteredTokens = filteredTokens.length > 0;
+  const allVisibleSelected =
+    hasFilteredTokens &&
+    filteredTokens.every((token) => selectedTokenIds.has(token.id));
+
+  const selectAllBtn = document.getElementById("tokenSelectAllBtn");
+  if (selectAllBtn) {
+    selectAllBtn.textContent = allVisibleSelected
+      ? "☑️ 取消全选"
+      : "☑️ 全选当前";
+    selectAllBtn.disabled = !hasFilteredTokens;
+  }
+
+  const clearBtn = document.getElementById("tokenClearSelectionBtn");
+  if (clearBtn) {
+    clearBtn.disabled = selectedTokenIds.size === 0;
+  }
+
+  document.querySelectorAll("[data-token-bulk-action]").forEach((button) => {
+    button.disabled = selectedTokenIds.size === 0;
+  });
+
+  const panel = document.getElementById("tokenBulkPanel");
+  if (panel) {
+    panel.classList.toggle("is-empty", selectedTokenIds.size === 0);
+  }
+}
+
+function toggleTokenSelection(tokenId, checked, event) {
+  event?.stopPropagation?.();
+  if (checked) {
+    selectedTokenIds.add(tokenId);
+  } else {
+    selectedTokenIds.delete(tokenId);
+  }
+  renderTokens(cachedTokens);
+}
+
+function toggleSelectAllTokens() {
+  const filteredTokenIds = getFilteredTokens().map((token) => token.id);
+  const allSelected =
+    filteredTokenIds.length > 0 &&
+    filteredTokenIds.every((tokenId) => selectedTokenIds.has(tokenId));
+
+  if (allSelected) {
+    filteredTokenIds.forEach((tokenId) => selectedTokenIds.delete(tokenId));
+  } else {
+    filteredTokenIds.forEach((tokenId) => selectedTokenIds.add(tokenId));
+  }
+
+  renderTokens(cachedTokens);
+}
+
+function clearTokenSelection() {
+  if (selectedTokenIds.size === 0) return;
+  selectedTokenIds.clear();
+  renderTokens(cachedTokens);
+}
+
+function downloadTokenExportPayload(payload, filenamePrefix) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${filenamePrefix}-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function executeTokenBatchAction(action, options = {}) {
+  const tokenIds = [...selectedTokenIds];
+  if (tokenIds.length === 0) {
+    showToast("请先选择要操作的 Token", "warning");
+    return null;
+  }
+
+  if (options.confirmMessage) {
+    const confirmed = await showConfirm(
+      options.confirmMessage,
+      options.confirmTitle || "批量操作确认",
+    );
+    if (!confirmed) return null;
+  }
+
+  let password = null;
+  if (options.requirePassword) {
+    password = await showPasswordPrompt(options.passwordPrompt);
+    if (!password) return null;
+  }
+
+  showLoading(options.loadingText || "正在批量处理...");
+  try {
+    const response = await authFetch("/admin/tokens/batch", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ action, tokenIds, password }),
+    });
+
+    const data = await response.json();
+    hideLoading();
+
+    if (!data.success) {
+      showToast(data.message || "批量操作失败", "error");
+      return null;
+    }
+
+    const payload = data.data || {};
+    const hasFailure = Number(payload.failCount) > 0;
+    const toastType = hasFailure ? "warning" : "success";
+
+    if (action === "export") {
+      downloadTokenExportPayload(
+        payload.exportData || { tokens: [] },
+        "tokens-selected-export",
+      );
+      showToast(data.message || "导出成功", toastType);
+    } else {
+      showToast(data.message || "批量操作成功", toastType);
+    }
+
+    if (action === "refresh_quota" && typeof quotaCache !== "undefined") {
+      tokenIds.forEach((tokenId) =>
+        quotaCache.clear(getQuotaCacheKey(tokenId, "antigravity")),
+      );
+    }
+
+    selectedTokenIds.clear();
+    skipAnimation = true;
+    await loadTokens();
+    return payload;
+  } catch (error) {
+    hideLoading();
+    showToast(`批量操作失败: ${error.message}`, "error");
+    return null;
+  }
+}
+
+async function batchEnableSelectedTokens() {
+  await executeTokenBatchAction("enable", {
+    confirmTitle: "批量启用确认",
+    confirmMessage: `确定要批量启用已选中的 ${selectedTokenIds.size} 个 Token 吗？\n系统会逐个验证凭证可用性。`,
+    loadingText: "正在批量验证并启用 Token...",
+  });
+}
+
+async function batchDisableSelectedTokens() {
+  await executeTokenBatchAction("disable", {
+    confirmTitle: "批量禁用确认",
+    confirmMessage: `确定要批量禁用已选中的 ${selectedTokenIds.size} 个 Token 吗？`,
+    loadingText: "正在批量禁用 Token...",
+  });
+}
+
+async function batchFetchSelectedProjectIds() {
+  await executeTokenBatchAction("fetch_project_id", {
+    loadingText: "正在批量获取 Project ID...",
+  });
+}
+
+async function batchRefreshSelectedTokenQuotas() {
+  await executeTokenBatchAction("refresh_quota", {
+    loadingText: "正在批量刷新额度...",
+  });
+}
+
+async function batchReloadSelectedTokens() {
+  await executeTokenBatchAction("refresh_token", {
+    loadingText: "正在批量重载凭证...",
+  });
+}
+
+async function batchExportSelectedTokens() {
+  await executeTokenBatchAction("export", {
+    requirePassword: true,
+    passwordPrompt: "请输入管理员密码以导出选中的 Token",
+    loadingText: "正在导出选中的 Token...",
+  });
+}
 
 // 注册事件监听器（便于后续清理）
 function registerEventListener(element, event, handler, options) {
@@ -956,6 +1166,8 @@ function renderTokens(tokens) {
     cachedTokens = tokens;
   }
 
+  syncSelectedTokenIds();
+
   document.getElementById("totalTokens").textContent = tokens.length;
   document.getElementById("enabledTokens").textContent = tokens.filter(
     (t) => t.enable,
@@ -991,6 +1203,7 @@ function renderTokens(tokens) {
                 <div class="empty-state-hint">${emptyHint}</div>
             </div>
         `;
+    updateTokenBatchActionState();
     return;
   }
 
@@ -999,6 +1212,7 @@ function renderTokens(tokens) {
       // 使用安全的 tokenId 替代 refresh_token
       const tokenId = token.id;
       const isRefreshing = refreshingTokens.has(tokenId);
+      const isSelected = selectedTokenIds.has(tokenId);
       const cardId = tokenId.substring(0, 8);
 
       // 计算在原始列表中的序号（基于添加顺序）
@@ -1021,9 +1235,12 @@ function renderTokens(tokens) {
         : "";
 
       return `
-        <div class="token-card ${!token.enable ? "disabled" : ""} ${isRefreshing ? "refreshing" : ""} ${skipAnimation ? "no-animation" : ""}" id="card-${escapeHtml(cardId)}">
+        <div class="token-card ${!token.enable ? "disabled" : ""} ${isRefreshing ? "refreshing" : ""} ${skipAnimation ? "no-animation" : ""} ${isSelected ? "selected" : ""}" id="card-${escapeHtml(cardId)}">
             <div class="token-header">
                 <div class="token-header-left">
+                    <label class="token-select-wrap" title="选择此 Token 进行批量操作">
+                        <input type="checkbox" class="token-select-checkbox" ${isSelected ? "checked" : ""} onclick="toggleTokenSelection('${safeTokenId}', this.checked, event)">
+                    </label>
                     <span class="status ${token.enable ? "enabled" : "disabled"}">
                         ${token.enable ? "✅ 启用" : "❌ 禁用"}
                     </span>
@@ -1076,6 +1293,7 @@ function renderTokens(tokens) {
   });
 
   updateSensitiveInfoDisplay();
+  updateTokenBatchActionState();
 
   // 重置动画跳过标志
   skipAnimation = false;
@@ -1318,7 +1536,7 @@ function showTokenDetail(tokenId) {
                     ${lastError}
                     ${lastErrorTimeStr || lastErrorStageLabel ? `<br><span class="token-error-meta">${lastErrorTimeStr ? "记录时间: " + lastErrorTimeStr : ""}${lastErrorTimeStr && lastErrorStageLabel ? " · " : ""}${lastErrorStageLabel ? "来源: " + lastErrorStageLabel : ""}</span>` : ""}
                 </div>
-                ${render403ActionUrls(token.lastError || '')}
+                ${render403ActionUrls(token.lastError || "")}
             </div>
             `
                 : ""
@@ -1329,7 +1547,7 @@ function showTokenDetail(tokenId) {
             <div class="form-group compact">
                 <label>⚠️ 禁用原因</label>
                 <div class="token-disable-detail" style="padding: 0.5rem; background: var(--danger-bg, rgba(220,53,69,0.1)); border-radius: 6px; font-size: 0.85rem; color: var(--danger, #dc3545); word-break: break-all; max-height: 8em; overflow-y: auto;">${disableReason}${disableTimeStr ? '<br><span style="color: var(--text-light); font-size: 0.8rem;">禁用时间: ' + disableTimeStr + "</span>" : ""}</div>
-                ${render403ActionUrls(token.disableReason || '')}
+                ${render403ActionUrls(token.disableReason || "")}
             </div>
             `
                 : ""

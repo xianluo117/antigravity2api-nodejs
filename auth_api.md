@@ -130,6 +130,119 @@ GET /admin/token-summary?password=your-admin-password
 
 ---
 
+## 2.6 获取 403 账号与认证 URL 列表
+
+### 接口
+
+`GET /admin/oauth/403-accounts`
+
+### 鉴权方式
+
+该接口用于直接对外查询，因此**必须**携带管理员密码 `password`。
+
+> 说明：当前实现支持从 query 或请求体中读取 `password`，但由于这是 `GET` 接口，建议统一使用 query 传参。
+
+### Query 参数
+
+| 参数       | 类型   | 必填 | 说明       |
+| ---------- | ------ | ---: | ---------- |
+| `password` | string |   是 | 管理员密码 |
+
+### 示例
+
+```http
+GET /admin/oauth/403-accounts?password=your-admin-password
+```
+
+### 返回逻辑
+
+接口会扫描当前 `antigravity` 与 `geminicli` 两类账号，筛选满足以下条件的记录：
+
+- 错误信息中包含 `403`
+- 错误信息中能够解析出目标为 `https://developers.google.com/gemini-code-assist/auth/` 的认证 URL
+
+接口会自动尝试处理以下场景：
+
+- 错误文本中的转义斜杠
+- URL 编码后的链接
+- Google 登录跳转链接中的 `continue` 参数
+
+### 去重规则
+
+- `antigravity` 与 `geminicli` 分开统计
+- 最终聚合结果会按邮箱去重
+- 当两个来源存在相同邮箱时，**以 `antigravity` 优先**，`geminicli` 中的重复邮箱会被跳过
+
+### 返回示例
+
+```json
+{
+  "success": true,
+  "data": {
+    "passwordAuth": true,
+    "priority": "antigravity",
+    "targetUrlPrefix": "https://developers.google.com/gemini-code-assist/auth/",
+    "accounts": [
+      {
+        "email": "user1@example.com",
+        "authUrl": "https://accounts.google.com/signin/continue?sarp=1&scc=1&continue=https://developers.google.com/gemini-code-assist/auth/auth_success_gemini&flowName=GlifWebSignIn",
+        "source": "antigravity",
+        "tokenId": "token_xxx",
+        "enable": false,
+        "matchedField": "disableReason",
+        "disableReason": "API请求返回403: https://accounts.google.com/signin/continue?...",
+        "disableTime": 1765109350660,
+        "lastError": "API请求返回403: https://accounts.google.com/signin/continue?...",
+        "lastErrorTime": 1765109350660,
+        "lastErrorStage": "disable"
+      }
+    ],
+    "antigravity": [
+      {
+        "email": "user1@example.com",
+        "authUrl": "https://accounts.google.com/signin/continue?sarp=1&scc=1&continue=https://developers.google.com/gemini-code-assist/auth/auth_success_gemini&flowName=GlifWebSignIn",
+        "source": "antigravity",
+        "tokenId": "token_xxx",
+        "enable": false,
+        "matchedField": "disableReason",
+        "disableReason": "API请求返回403: https://accounts.google.com/signin/continue?...",
+        "disableTime": 1765109350660,
+        "lastError": "API请求返回403: https://accounts.google.com/signin/continue?...",
+        "lastErrorTime": 1765109350660,
+        "lastErrorStage": "disable"
+      }
+    ],
+    "geminicli": [],
+    "summary": {
+      "total": 1,
+      "antigravity": 1,
+      "geminicli": 0,
+      "duplicateSkipped": 0
+    }
+  }
+}
+```
+
+### 返回字段说明
+
+| 字段                       | 说明                                                              |
+| -------------------------- | ----------------------------------------------------------------- |
+| `data.accounts`            | 最终聚合后的账号列表                                              |
+| `data.antigravity`         | `antigravity` 来源命中的账号列表                                  |
+| `data.geminicli`           | `geminicli` 来源命中的账号列表（已避开与 `antigravity` 重复邮箱） |
+| `email`                    | 账号邮箱                                                          |
+| `authUrl`                  | 从 403 错误信息中提取出的认证 URL                                 |
+| `matchedField`             | 命中的错误字段，可能是 `disableReason` 或 `lastError`             |
+| `summary.duplicateSkipped` | 因邮箱重复而被跳过的记录数量                                      |
+
+### 适用场景
+
+- 外部程序直接轮询当前需要重新认证的账号
+- 批量提取 403 失效账号及其对应 Google 认证跳转链接
+- 将 `antigravity` / `geminicli` 两套账号失败数据统一聚合输出
+
+---
+
 ## 3. 提交授权码并交换 Token
 
 ### 接口

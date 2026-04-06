@@ -10,7 +10,7 @@
     <!-- 防止页面闪烁：在渲染前根据Tab状态设置初始显示 -->
     <script>
       (function () {
-        window.__STATIC_VERSION__ = "20260406-1";
+        window.__STATIC_VERSION__ = "20260406-2";
         // 初始状态：auth-checking 表示正在验证登录状态
         // 验证完成后会变成 auth-ready + logged-in 或 auth-ready
         var currentTab = localStorage.getItem("currentTab") || "tokens";
@@ -406,6 +406,88 @@
               </div>
             </div>
 
+            <div class="bulk-actions-panel" id="tokenBulkPanel">
+              <div class="bulk-actions-header">
+                <div class="bulk-actions-title">🗂️ 批量操作</div>
+                <div class="bulk-actions-meta">
+                  已选 <span id="selectedTokenCount">0</span> 个凭证
+                </div>
+              </div>
+              <div class="bulk-actions-controls">
+                <button
+                  type="button"
+                  onclick="toggleSelectAllTokens()"
+                  class="btn btn-secondary btn-sm"
+                  id="tokenSelectAllBtn"
+                >
+                  ☑️ 全选当前
+                </button>
+                <button
+                  type="button"
+                  onclick="clearTokenSelection()"
+                  class="btn btn-secondary btn-sm"
+                  id="tokenClearSelectionBtn"
+                >
+                  🧹 清空选择
+                </button>
+                <button
+                  type="button"
+                  onclick="batchEnableSelectedTokens()"
+                  class="btn btn-success btn-sm"
+                  data-token-bulk-action
+                  disabled
+                >
+                  ▶️ 批量启用
+                </button>
+                <button
+                  type="button"
+                  onclick="batchDisableSelectedTokens()"
+                  class="btn btn-warning btn-sm"
+                  data-token-bulk-action
+                  disabled
+                >
+                  ⏸️ 批量禁用
+                </button>
+                <button
+                  type="button"
+                  onclick="batchFetchSelectedProjectIds()"
+                  class="btn btn-info btn-sm"
+                  data-token-bulk-action
+                  disabled
+                >
+                  🔍 批量获取
+                </button>
+                <button
+                  type="button"
+                  onclick="batchRefreshSelectedTokenQuotas()"
+                  class="btn btn-info btn-sm"
+                  data-token-bulk-action
+                  disabled
+                >
+                  📊 刷新额度
+                </button>
+                <button
+                  type="button"
+                  onclick="batchReloadSelectedTokens()"
+                  class="btn btn-warning btn-sm"
+                  data-token-bulk-action
+                  disabled
+                >
+                  🔄 重载凭证
+                </button>
+                <button
+                  type="button"
+                  onclick="batchExportSelectedTokens()"
+                  class="btn btn-sm"
+                  style="background: var(--primary)"
+                  data-token-bulk-action
+                  disabled
+                >
+                  📤 导出选中
+                </button>
+              </div>
+            </div>
+
             <!-- Token网格 -->
             <div id="tokenList" class="token-grid">
               <div class="empty-state">
@@ -491,6 +573,88 @@
                   title="添加/导入Token"
                 >
                   📥 导入
+                </button>
+              </div>
+            </div>
+
+            <div class="bulk-actions-panel" id="geminicliBulkPanel">
+              <div class="bulk-actions-header">
+                <div class="bulk-actions-title">🗂️ CLI 批量操作</div>
+                <div class="bulk-actions-meta">
+                  已选 <span id="selectedGeminiCliTokenCount">0</span> 个凭证
+                </div>
+              </div>
+              <div class="bulk-actions-controls">
+                <button
+                  type="button"
+                  onclick="toggleSelectAllGeminiCliTokens()"
+                  class="btn btn-secondary btn-sm"
+                  id="geminicliSelectAllBtn"
+                >
+                  ☑️ 全选当前
+                </button>
+                <button
+                  type="button"
+                  onclick="clearGeminiCliTokenSelection()"
+                  class="btn btn-secondary btn-sm"
+                  id="geminicliClearSelectionBtn"
+                >
+                  🧹 清空选择
+                </button>
+                <button
+                  type="button"
+                  onclick="batchEnableSelectedGeminiCliTokens()"
+                  class="btn btn-success btn-sm"
+                  data-geminicli-bulk-action
+                  disabled
+                >
+                  ▶️ 批量启用
+                </button>
+                <button
+                  type="button"
+                  onclick="batchDisableSelectedGeminiCliTokens()"
+                  class="btn btn-warning btn-sm"
+                  data-geminicli-bulk-action
+                  disabled
+                >
+                  ⏸️ 批量禁用
+                </button>
+                <button
+                  type="button"
+                  onclick="batchFetchSelectedGeminiCliProjectIds()"
+                  class="btn btn-info btn-sm"
+                  data-geminicli-bulk-action
+                  disabled
+                >
+                  🔍 批量获取
+                </button>
+                <button
+                  type="button"
+                  onclick="batchRefreshSelectedGeminiCliQuotas()"
+                  class="btn btn-info btn-sm"
+                  data-geminicli-bulk-action
+                  disabled
+                >
+                  📊 刷新额度
+                </button>
+                <button
+                  type="button"
+                  onclick="batchReloadSelectedGeminiCliTokens()"
+                  class="btn btn-warning btn-sm"
+                  data-geminicli-bulk-action
+                  disabled
+                >
+                  🔄 重载凭证
+                </button>
+                <button
+                  type="button"
+                  onclick="batchExportSelectedGeminiCliTokens()"
+                  class="btn btn-sm"
+                  style="background: var(--primary)"
+                  data-geminicli-bulk-action
+                  disabled
+                >
+                  📤 导出选中
                 </button>
               </div>
             </div>
