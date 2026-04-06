@@ -412,7 +412,7 @@ class GeminiCliTokenManager {
     try {
       const salt = await this.store.getSalt();
       const tokenId = generateTokenId(token.refresh_token, salt);
-      quotaManager.recordRequest(tokenId, modelId);
+      quotaManager.recordRequest(tokenId, modelId, "geminicli");
     } catch (error) {
       log.warn("[GeminiCLI] 记录请求次数失败:", error.message);
     }
@@ -433,7 +433,7 @@ class GeminiCliTokenManager {
       if (!salt) return true;
 
       const tokenId = generateTokenId(token.refresh_token, salt);
-      return quotaManager.hasQuotaForModel(tokenId, modelId);
+      return quotaManager.hasQuotaForModel(tokenId, modelId, "geminicli");
     } catch (error) {
       return true;
     }
@@ -454,7 +454,7 @@ class GeminiCliTokenManager {
       if (!salt) return true;
 
       const tokenId = generateTokenId(token.refresh_token, salt);
-      return tokenCooldownManager.isAvailable(tokenId, modelId);
+      return tokenCooldownManager.isAvailable(tokenId, modelId, "geminicli");
     } catch (error) {
       return true;
     }
@@ -518,6 +518,7 @@ class GeminiCliTokenManager {
       const availability = quotaManager.getModelGroupAvailability(
         tokenId,
         modelId,
+        "geminicli",
       );
 
       if (!availability.hasData) {

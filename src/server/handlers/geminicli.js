@@ -79,7 +79,7 @@ export const handleGeminiCliRequest = async (req, res, forceFormat = null) => {
     const refreshQuota = async () => {
       if (!tokenId || !token?.projectId || !actualModel) return;
       const quotas = await getGeminiCliQuotas(token);
-      quotaManager.updateQuota(tokenId, quotas);
+      quotaManager.updateQuota(tokenId, quotas, "geminicli");
     };
 
     const createRetryOptions = (prefix) => ({
@@ -88,6 +88,7 @@ export const handleGeminiCliRequest = async (req, res, forceFormat = null) => {
       tokenId,
       modelId: actualModel,
       refreshQuota,
+      groupingMode: "geminicli",
     });
 
     // 假流式模式：使用非流式 API 获取数据，然后模拟流式输出

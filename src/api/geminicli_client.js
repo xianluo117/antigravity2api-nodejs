@@ -183,7 +183,12 @@ async function handleApiError(error, token, model) {
           resetTimestamp = Date.now() + 5 * 60 * 1000;
         }
 
-        tokenCooldownManager.setCooldown(tokenId, model, resetTimestamp);
+        tokenCooldownManager.setCooldown(
+          tokenId,
+          model,
+          resetTimestamp,
+          "geminicli",
+        );
       } catch {
         // 设置冷却失败不影响错误抛出
       }

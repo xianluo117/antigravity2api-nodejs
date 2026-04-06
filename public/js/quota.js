@@ -96,37 +96,75 @@ if (typeof document !== "undefined") {
   });
 }
 
-const QUOTA_GROUPS = [
-  {
-    key: "claude",
-    label: "Claude",
-    iconSrc: "/assets/icons/claude.svg",
-    match: (modelId) => modelId.toLowerCase().includes("claude"),
+const QUOTA_GROUP_CONFIGS = {
+  antigravity: {
+    groups: [
+      {
+        key: "claude",
+        label: "Claude",
+        iconSrc: "/assets/icons/claude.svg",
+        match: (modelId) => modelId.toLowerCase().includes("claude"),
+      },
+      {
+        key: "banana",
+        label: "banana",
+        iconSrc: "/assets/icons/banana.svg",
+        match: (modelId) =>
+          modelId.toLowerCase().includes("gemini-3.1-flash-image"),
+      },
+      {
+        key: "gemini",
+        label: "Gemini",
+        iconSrc: "/assets/icons/gemini.svg",
+        match: (modelId) =>
+          modelId.toLowerCase().includes("gemini") ||
+          modelId.toLowerCase().includes("publishers/google/"),
+      },
+      {
+        key: "other",
+        label: "其他",
+        iconSrc: "",
+        match: () => true,
+      },
+    ],
+    summaryKeys: ["claude", "gemini", "banana"],
   },
-  {
-    key: "banana",
-    label: "banana",
-    iconSrc: "/assets/icons/banana.svg",
-    match: (modelId) =>
-      modelId.toLowerCase().includes("gemini-3.1-flash-image"),
+  geminicli: {
+    groups: [
+      {
+        key: "flash",
+        label: "Flash",
+        iconSrc: "/assets/icons/gemini.svg",
+        match: (modelId) => modelId.toLowerCase().includes("flash"),
+      },
+      {
+        key: "pro",
+        label: "Pro",
+        iconSrc: "/assets/icons/gemini.svg",
+        match: (modelId) => modelId.toLowerCase().includes("pro"),
+      },
+      {
+        key: "other",
+        label: "其他",
+        iconSrc: "",
+        match: () => true,
+      },
+    ],
+    summaryKeys: ["flash", "pro"],
   },
-  {
-    key: "gemini",
-    label: "Gemini",
-    iconSrc: "/assets/icons/gemini.svg",
-    match: (modelId) =>
-      modelId.toLowerCase().includes("gemini") ||
-      modelId.toLowerCase().includes("publishers/google/"),
-  },
-  {
-    key: "other",
-    label: "其他",
-    iconSrc: "",
-    match: () => true,
-  },
-];
+};
 
-const QUOTA_SUMMARY_KEYS = ["claude", "gemini", "banana"];
+function getQuotaViewMode(mode = "antigravity") {
+  return mode === "geminicli" ? "geminicli" : "antigravity";
+}
+
+function getQuotaGroups(mode = "antigravity") {
+  return QUOTA_GROUP_CONFIGS[getQuotaViewMode(mode)].groups;
+}
+
+function getQuotaSummaryKeys(mode = "antigravity") {
+  return QUOTA_GROUP_CONFIGS[getQuotaViewMode(mode)].summaryKeys;
+}
 
 function getGroupIconHtml(group) {
   const src = group?.iconSrc || "";
@@ -156,13 +194,16 @@ function getBarColor(percentage) {
   return "#ef4444";
 }
 
-function groupModels(models) {
-  const grouped = { claude: [], gemini: [], banana: [], other: [] };
+function groupModels(models, mode = "antigravity") {
+  const quotaGroups = getQuotaGroups(mode);
+  const grouped = Object.fromEntries(
+    quotaGroups.map((group) => [group.key, []]),
+  );
 
   Object.entries(models || {}).forEach(([modelId, quota]) => {
     const groupKey = (
-      QUOTA_GROUPS.find((g) => g.match(modelId)) ||
-      QUOTA_GROUPS[QUOTA_GROUPS.length - 1]
+      quotaGroups.find((g) => g.match(modelId)) ||
+      quotaGroups[quotaGroups.length - 1]
     ).key;
     if (!grouped[groupKey]) grouped[groupKey] = [];
     grouped[groupKey].push({ modelId, quota });
@@ -175,6 +216,8 @@ function groupModels(models) {
 const GROUP_COST_PERCENT = {
   claude: 0.6667,
   gemini: 0.6667,
+  flash: 0.6667,
+  pro: 0.6667,
   banana: 5.0, // 图片生成模型消耗更高，约 20 次/满额
   other: 0.6667,
 };
@@ -264,7 +307,7 @@ async function loadTokenQuotaSummary(
   const cacheKey = getQuotaCacheKey(tokenId, mode);
   const cached = quotaCache.get(cacheKey);
   if (cached) {
-    renderQuotaSummary(summaryEl, cached);
+    renderQuotaSummary(summaryEl, cached, mode);
     return;
   }
 
@@ -274,10 +317,10 @@ async function loadTokenQuotaSummary(
 
     if (data.success && data.data && data.data.models) {
       quotaCache.set(cacheKey, data.data);
-      renderQuotaSummary(summaryEl, data.data);
+      renderQuotaSummary(summaryEl, data.data, mode);
     } else if (data.success && data.data) {
       // 禁用的 token 可能返回空数据
-      renderQuotaSummary(summaryEl, data.data);
+      renderQuotaSummary(summaryEl, data.data, mode);
     } else {
       const errMsg = escapeHtml(data.message || "未知错误");
       summaryEl.innerHTML = `<span class="quota-summary-error">📊 ${errMsg}</span>`;
@@ -290,7 +333,7 @@ async function loadTokenQuotaSummary(
   }
 }
 
-function renderQuotaSummary(summaryEl, quotaData) {
+function renderQuotaSummary(summaryEl, quotaData, mode = "antigravity") {
   const models = quotaData.models;
   const requestCounts = quotaData.requestCounts || {};
   const modelEntries = Object.entries(models || {});
@@ -300,29 +343,32 @@ function renderQuotaSummary(summaryEl, quotaData) {
     return;
   }
 
-  const grouped = groupModels(models);
-  const groupByKey = Object.fromEntries(QUOTA_GROUPS.map((g) => [g.key, g]));
+  const quotaGroups = getQuotaGroups(mode);
+  const grouped = groupModels(models, mode);
+  const groupByKey = Object.fromEntries(quotaGroups.map((g) => [g.key, g]));
 
-  const rowsHtml = QUOTA_SUMMARY_KEYS.map((groupKey) => {
-    const group = groupByKey[groupKey];
-    const summary = summarizeGroup(
-      grouped[groupKey],
-      requestCounts[groupKey] || 0,
-      groupKey,
-    );
-    const barColor =
-      summary.percentageText === "--"
-        ? "#9ca3af"
-        : getBarColor(summary.percentage);
-    const safeResetTime = escapeHtml(summary.resetTime);
-    const resetText = safeResetTime === "--" ? "--" : `重置: ${safeResetTime}`;
-    const estimatedText =
-      summary.estimatedRequests > 0
-        ? ` · 约${summary.estimatedRequests}次`
-        : "";
-    const safeLabel = escapeHtml(group?.label || groupKey);
-    const title = `${group?.label || groupKey} - 重置: ${summary.resetTime} - 预估可用: ${summary.estimatedRequests}次`;
-    return `
+  const rowsHtml = getQuotaSummaryKeys(mode)
+    .map((groupKey) => {
+      const group = groupByKey[groupKey];
+      const summary = summarizeGroup(
+        grouped[groupKey],
+        requestCounts[groupKey] || 0,
+        groupKey,
+      );
+      const barColor =
+        summary.percentageText === "--"
+          ? "#9ca3af"
+          : getBarColor(summary.percentage);
+      const safeResetTime = escapeHtml(summary.resetTime);
+      const resetText =
+        safeResetTime === "--" ? "--" : `重置: ${safeResetTime}`;
+      const estimatedText =
+        summary.estimatedRequests > 0
+          ? ` · 约${summary.estimatedRequests}次`
+          : "";
+      const safeLabel = escapeHtml(group?.label || groupKey);
+      const title = `${group?.label || groupKey} - 重置: ${summary.resetTime} - 预估可用: ${summary.estimatedRequests}次`;
+      return `
             <div class="quota-summary-row" title="${escapeHtml(title)}">
                 <span class="quota-summary-icon">${getGroupIconHtml(group)}</span>
                 <span class="quota-summary-label">${safeLabel}</span>
@@ -331,7 +377,8 @@ function renderQuotaSummary(summaryEl, quotaData) {
                 <span class="quota-summary-reset">${resetText}${estimatedText}</span>
             </div>
         `;
-  }).join("");
+    })
+    .join("");
 
   summaryEl.innerHTML = `
         <div class="quota-summary-grid">
@@ -388,7 +435,8 @@ async function loadQuotaDetail(cardId, tokenId, mode = "antigravity") {
         return;
       }
 
-      const grouped = groupModels(models);
+      const quotaGroups = getQuotaGroups(mode);
+      const grouped = groupModels(models, mode);
 
       let html = '<div class="quota-detail-grid">';
 
@@ -420,13 +468,14 @@ async function loadQuotaDetail(cardId, tokenId, mode = "antigravity") {
         return groupHtml;
       };
 
-      const groupByKey = Object.fromEntries(
-        QUOTA_GROUPS.map((g) => [g.key, g]),
-      );
-      html += renderGroup(grouped.claude, getGroupIconHtml(groupByKey.claude));
-      html += renderGroup(grouped.gemini, getGroupIconHtml(groupByKey.gemini));
-      html += renderGroup(grouped.banana, getGroupIconHtml(groupByKey.banana));
-      html += renderGroup(grouped.other, "");
+      const groupByKey = Object.fromEntries(quotaGroups.map((g) => [g.key, g]));
+      quotaGroups.forEach((group) => {
+        const items = grouped[group.key] || [];
+        if (group.key === "other" && items.length === 0) {
+          return;
+        }
+        html += renderGroup(items, getGroupIconHtml(groupByKey[group.key]));
+      });
       html += "</div>";
       html += `<button class="btn btn-info btn-xs quota-refresh-btn" onclick="refreshInlineQuota('${escapeJs(cardId)}', '${escapeJs(tokenId)}', '${escapeJs(mode)}')">🔄 刷新额度</button>`;
 
@@ -598,7 +647,7 @@ async function loadQuotaData(
   if (!forceRefresh) {
     const cached = quotaCache.get(getQuotaCacheKey(tokenId, mode));
     if (cached) {
-      renderQuotaModal(quotaContent, cached);
+      renderQuotaModal(quotaContent, cached, mode);
       if (refreshBtn) {
         refreshBtn.disabled = false;
         refreshBtn.textContent = "🔄 刷新";
@@ -620,7 +669,7 @@ async function loadQuotaData(
 
     if (data.success) {
       quotaCache.set(getQuotaCacheKey(tokenId, mode), data.data);
-      renderQuotaModal(quotaContent, data.data);
+      renderQuotaModal(quotaContent, data.data, mode);
     } else {
       quotaContent.innerHTML = `<div class="quota-error">加载失败: ${escapeHtml(data.message)}</div>`;
     }
@@ -704,7 +753,7 @@ async function refreshAllQuotas(mode = "antigravity") {
   }
 }
 
-function renderQuotaModal(quotaContent, quotaData) {
+function renderQuotaModal(quotaContent, quotaData, mode = "antigravity") {
   const models = quotaData.models;
   const requestCounts = quotaData.requestCounts || {};
 
@@ -727,7 +776,8 @@ function renderQuotaModal(quotaContent, quotaData) {
     return;
   }
 
-  const grouped = groupModels(models);
+  const quotaGroups = getQuotaGroups(mode);
+  const grouped = groupModels(models, mode);
 
   let html = "";
 
@@ -789,13 +839,14 @@ function renderQuotaModal(quotaContent, quotaData) {
     return groupHtml;
   };
 
-  const groupByKey = Object.fromEntries(QUOTA_GROUPS.map((g) => [g.key, g]));
-  html += renderGroup(grouped.claude, groupByKey.claude, "claude");
-  html += renderGroup(grouped.gemini, groupByKey.gemini, "gemini");
-  html += renderGroup(grouped.banana, groupByKey.banana, "banana");
-  if (grouped.other && grouped.other.length > 0) {
-    html += renderGroup(grouped.other, groupByKey.other, "other");
-  }
+  const groupByKey = Object.fromEntries(quotaGroups.map((g) => [g.key, g]));
+  quotaGroups.forEach((group) => {
+    const items = grouped[group.key] || [];
+    if (group.key === "other" && items.length === 0) {
+      return;
+    }
+    html += renderGroup(items, groupByKey[group.key], group.key);
+  });
 
   quotaContent.innerHTML = html;
 }

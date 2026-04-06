@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { QUOTA_CACHE_TTL, QUOTA_CLEANUP_INTERVAL } from "../constants/index.js";
 import { log } from "../utils/logger.js";
-import { getGroupKey } from "../utils/modelGroups.js";
+import { getGroupKey, MODEL_GROUPING_MODES } from "../utils/modelGroups.js";
 import { getDataDir } from "../utils/paths.js";
 
 // 每次请求消耗的额度百分比（按模型系列区分）
@@ -12,6 +12,8 @@ const REQUEST_COST_PERCENT = 0.6667;
 const GROUP_COST_PERCENT = {
   claude: 0.6667,
   gemini: 0.6667,
+  flash: 0.6667,
+  pro: 0.6667,
   banana: 5.0, // 图片生成模型消耗更高，约 20 次/满额
   other: 0.6667,
 };
@@ -22,7 +24,7 @@ class QuotaManager {
    */
   constructor(filePath = path.join(getDataDir(), "quotas.json")) {
     this.filePath = filePath;
-    /** @type {Map<string, {lastUpdated: number, models: Object, requestCounts: Object, resetTimes: Object}>} */
+    /** @type {Map<string, {lastUpdated: number, models: Object, requestCounts: Object, resetTimes: Object, groupingMode?: string}>} */
     this.cache = new Map();
     this.CACHE_TTL = QUOTA_CACHE_TTL;
     this.CLEANUP_INTERVAL = QUOTA_CLEANUP_INTERVAL;
@@ -89,11 +91,22 @@ class QuotaManager {
    * @param {string} refreshToken - Token ID
    * @param {Object} quotas - 额度数据
    */
-  updateQuota(refreshToken, quotas) {
+  updateQuota(
+    refreshToken,
+    quotas,
+    groupingMode = MODEL_GROUPING_MODES.DEFAULT,
+  ) {
     const existing = this.cache.get(refreshToken) || {};
     const existingModels = existing.models || {};
-    const existingRequestCounts = existing.requestCounts || {};
-    const existingResetTimes = existing.resetTimes || {};
+    const effectiveGroupingMode =
+      groupingMode || existing.groupingMode || MODEL_GROUPING_MODES.DEFAULT;
+    const groupingChanged =
+      !!existing.groupingMode &&
+      existing.groupingMode !== effectiveGroupingMode;
+    const existingRequestCounts = groupingChanged
+      ? {}
+      : existing.requestCounts || {};
+    const existingResetTimes = groupingChanged ? {} : existing.resetTimes || {};
 
     // 检查各个模型组的重置时间和额度变化
     const newResetTimes = {};
@@ -108,7 +121,7 @@ class QuotaManager {
 
     // 计算新数据中每个组的最低额度和重置时间
     Object.entries(quotas || {}).forEach(([modelId, quotaData]) => {
-      const groupKey = getGroupKey(modelId);
+      const groupKey = getGroupKey(modelId, effectiveGroupingMode);
       const remaining = quotaData.r || 0;
 
       if (
@@ -134,7 +147,7 @@ class QuotaManager {
 
     // 计算旧数据中每个组的最低额度
     Object.entries(existingModels).forEach(([modelId, quotaData]) => {
-      const groupKey = getGroupKey(modelId);
+      const groupKey = getGroupKey(modelId, effectiveGroupingMode);
       const remaining = quotaData.r || 0;
 
       if (
@@ -185,6 +198,7 @@ class QuotaManager {
       models: quotas,
       requestCounts: newRequestCounts,
       resetTimes: newResetTimes,
+      groupingMode: effectiveGroupingMode,
     });
     this.saveToFile();
   }
@@ -194,7 +208,11 @@ class QuotaManager {
    * @param {string} refreshToken - Token ID
    * @param {string} modelId - 使用的模型 ID
    */
-  recordRequest(refreshToken, modelId) {
+  recordRequest(
+    refreshToken,
+    modelId,
+    groupingMode = MODEL_GROUPING_MODES.DEFAULT,
+  ) {
     let data = this.cache.get(refreshToken);
 
     // 如果没有缓存条目，创建一个新的
@@ -204,11 +222,21 @@ class QuotaManager {
         models: {},
         requestCounts: {},
         resetTimes: {},
+        groupingMode,
       };
       this.cache.set(refreshToken, data);
     }
 
-    const groupKey = getGroupKey(modelId);
+    const requestedGroupingMode = groupingMode || MODEL_GROUPING_MODES.DEFAULT;
+    if (data.groupingMode && data.groupingMode !== requestedGroupingMode) {
+      data.requestCounts = {};
+      data.resetTimes = {};
+    }
+
+    const effectiveGroupingMode = requestedGroupingMode;
+    data.groupingMode = effectiveGroupingMode;
+
+    const groupKey = getGroupKey(modelId, effectiveGroupingMode);
     if (!data.requestCounts) data.requestCounts = {};
 
     // 检查是否已过重置时间
@@ -278,9 +306,11 @@ class QuotaManager {
    * @param {string} modelId - 模型 ID
    * @returns {{groupKey: string, hasData: boolean, remainingFraction: number, requestCount: number, estimatedRequests: number|null}}
    */
-  getModelGroupAvailability(tokenId, modelId) {
-    const groupKey = getGroupKey(modelId);
+  getModelGroupAvailability(tokenId, modelId, groupingMode = null) {
     const data = this.cache.get(tokenId);
+    const effectiveGroupingMode =
+      groupingMode || data?.groupingMode || MODEL_GROUPING_MODES.DEFAULT;
+    const groupKey = getGroupKey(modelId, effectiveGroupingMode);
 
     if (!data || !data.models) {
       return {
@@ -296,7 +326,7 @@ class QuotaManager {
     let found = false;
 
     for (const [id, quotaData] of Object.entries(data.models)) {
-      const idGroupKey = getGroupKey(id);
+      const idGroupKey = getGroupKey(id, effectiveGroupingMode);
       if (idGroupKey === groupKey) {
         found = true;
         const remaining = quotaData.r || 0;
@@ -336,8 +366,12 @@ class QuotaManager {
    * @param {string} modelId - 模型 ID
    * @returns {boolean} 是否有额度（true = 有额度或无数据，false = 额度为 0）
    */
-  hasQuotaForModel(tokenId, modelId) {
-    const availability = this.getModelGroupAvailability(tokenId, modelId);
+  hasQuotaForModel(tokenId, modelId, groupingMode = null) {
+    const availability = this.getModelGroupAvailability(
+      tokenId,
+      modelId,
+      groupingMode,
+    );
     if (!availability.hasData) {
       return true;
     }
@@ -351,18 +385,20 @@ class QuotaManager {
    * @param {string} modelId - 模型 ID
    * @returns {number} 该组的最小额度 (0-1)，如果没有数据返回 1
    */
-  getModelGroupQuota(tokenId, modelId) {
+  getModelGroupQuota(tokenId, modelId, groupingMode = null) {
     const data = this.cache.get(tokenId);
     if (!data || !data.models) {
       return 1; // 没有数据，假设满额
     }
 
-    const groupKey = getGroupKey(modelId);
+    const effectiveGroupingMode =
+      groupingMode || data?.groupingMode || MODEL_GROUPING_MODES.DEFAULT;
+    const groupKey = getGroupKey(modelId, effectiveGroupingMode);
     let minRemaining = 1;
     let found = false;
 
     for (const [id, quotaData] of Object.entries(data.models)) {
-      const idGroupKey = getGroupKey(id);
+      const idGroupKey = getGroupKey(id, effectiveGroupingMode);
       if (idGroupKey === groupKey) {
         found = true;
         const remaining = quotaData.r || 0;
@@ -381,18 +417,20 @@ class QuotaManager {
    * @param {string} modelId - 模型 ID
    * @returns {{resetTime: number|null, hasData: boolean}} resetTime 为时间戳（毫秒），hasData 表示是否有该系列的数据
    */
-  getModelGroupResetTime(tokenId, modelId) {
+  getModelGroupResetTime(tokenId, modelId, groupingMode = null) {
     const data = this.cache.get(tokenId);
     if (!data || !data.models) {
       return { resetTime: null, hasData: false };
     }
 
-    const groupKey = getGroupKey(modelId);
+    const effectiveGroupingMode =
+      groupingMode || data?.groupingMode || MODEL_GROUPING_MODES.DEFAULT;
+    const groupKey = getGroupKey(modelId, effectiveGroupingMode);
     let earliestReset = null;
     let found = false;
 
     for (const [id, quotaData] of Object.entries(data.models)) {
-      const idGroupKey = getGroupKey(id);
+      const idGroupKey = getGroupKey(id, effectiveGroupingMode);
       if (idGroupKey === groupKey) {
         found = true;
         const resetTimeRaw = quotaData.t;

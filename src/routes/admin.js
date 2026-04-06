@@ -287,7 +287,7 @@ async function refreshGeminiCliQuotaByTokenId(tokenId) {
   }
 
   const quotas = await getGeminiCliQuotas(tokenData);
-  quotaManager.updateQuota(tokenId, quotas);
+  quotaManager.updateQuota(tokenId, quotas, "geminicli");
   return quotas;
 }
 
@@ -466,7 +466,7 @@ async function warmupGeminiCliRotationQuotas() {
       }
 
       const quotas = await getGeminiCliQuotas(activeToken);
-      quotaManager.updateQuota(tokenId, quotas);
+      quotaManager.updateQuota(tokenId, quotas, "geminicli");
 
       const tokenIndex = geminicliTokenManager.tokens.findIndex(
         (item) =>
@@ -2615,7 +2615,7 @@ router.get(
 
         if (!quotaData) {
           const quotas = await getGeminiCliQuotas(tokenData);
-          quotaManager.updateQuota(tokenId, quotas);
+          quotaManager.updateQuota(tokenId, quotas, "geminicli");
           quotaData = quotaManager.getQuota(tokenId) || {
             lastUpdated: Date.now(),
             models: quotas,

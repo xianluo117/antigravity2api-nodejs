@@ -1,8 +1,8 @@
-import fs from 'fs';
-import path from 'path';
-import { log } from '../utils/logger.js';
-import { getDataDir } from '../utils/paths.js';
-import { getGroupKey, MODEL_GROUPS } from '../utils/modelGroups.js';
+import fs from "fs";
+import path from "path";
+import { log } from "../utils/logger.js";
+import { getGroupKey } from "../utils/modelGroups.js";
+import { getDataDir } from "../utils/paths.js";
 
 /**
  * Token 模型系列冷却管理器
@@ -22,7 +22,7 @@ import { getGroupKey, MODEL_GROUPS } from '../utils/modelGroups.js';
  */
 
 class TokenCooldownManager {
-  constructor(filePath = path.join(getDataDir(), 'token_cooldowns.json')) {
+  constructor(filePath = path.join(getDataDir(), "token_cooldowns.json")) {
     this.filePath = filePath;
     /** @type {Map<string, Object>} tokenId -> { groupKey: { until: timestamp } } */
     this.cooldowns = new Map();
@@ -38,20 +38,24 @@ class TokenCooldownManager {
     if (!fs.existsSync(this.filePath)) {
       const initialData = {
         meta: { version: 1 },
-        cooldowns: {}
+        cooldowns: {},
       };
-      fs.writeFileSync(this.filePath, JSON.stringify(initialData, null, 2), 'utf8');
+      fs.writeFileSync(
+        this.filePath,
+        JSON.stringify(initialData, null, 2),
+        "utf8",
+      );
     }
   }
 
   loadFromFile() {
     try {
-      const data = fs.readFileSync(this.filePath, 'utf8');
+      const data = fs.readFileSync(this.filePath, "utf8");
       const parsed = JSON.parse(data);
       const cooldowns = parsed.cooldowns || {};
 
       Object.entries(cooldowns).forEach(([tokenId, groups]) => {
-        if (groups && typeof groups === 'object') {
+        if (groups && typeof groups === "object") {
           this.cooldowns.set(tokenId, groups);
         }
       });
@@ -59,7 +63,7 @@ class TokenCooldownManager {
       // 启动时清理过期的冷却状态
       this._cleanupExpired();
     } catch (error) {
-      log.error('[CooldownManager] 加载冷却状态文件失败:', error.message);
+      log.error("[CooldownManager] 加载冷却状态文件失败:", error.message);
     }
   }
 
@@ -83,11 +87,11 @@ class TokenCooldownManager {
 
       const data = {
         meta: { version: 1 },
-        cooldowns: cooldownsObj
+        cooldowns: cooldownsObj,
       };
-      fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), 'utf8');
+      fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), "utf8");
     } catch (error) {
-      log.error('[CooldownManager] 保存冷却状态文件失败:', error.message);
+      log.error("[CooldownManager] 保存冷却状态文件失败:", error.message);
     }
   }
 
@@ -120,10 +124,10 @@ class TokenCooldownManager {
    * @param {string} modelId - 模型 ID（用于确定模型系列）
    * @param {number} untilTimestamp - 禁用截止时间戳（毫秒）
    */
-  setCooldown(tokenId, modelId, untilTimestamp) {
+  setCooldown(tokenId, modelId, untilTimestamp, groupingMode = "default") {
     if (!tokenId || !untilTimestamp) return;
 
-    const groupKey = getGroupKey(modelId);
+    const groupKey = getGroupKey(modelId, groupingMode);
     let groups = this.cooldowns.get(tokenId);
 
     if (!groups) {
@@ -140,7 +144,9 @@ class TokenCooldownManager {
     groups[groupKey] = { until: untilTimestamp };
 
     const resetDate = new Date(untilTimestamp);
-    log.warn(`[CooldownManager] Token ${tokenId} 的 ${groupKey} 系列已禁用，将在 ${resetDate.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })} 恢复`);
+    log.warn(
+      `[CooldownManager] Token ${tokenId} 的 ${groupKey} 系列已禁用，将在 ${resetDate.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })} 恢复`,
+    );
 
     this.saveToFile();
   }
@@ -151,13 +157,13 @@ class TokenCooldownManager {
    * @param {string} modelId - 模型 ID
    * @returns {boolean} true = 可用，false = 在冷却中
    */
-  isAvailable(tokenId, modelId) {
+  isAvailable(tokenId, modelId, groupingMode = "default") {
     if (!tokenId) return true;
 
     const groups = this.cooldowns.get(tokenId);
     if (!groups) return true;
 
-    const groupKey = getGroupKey(modelId);
+    const groupKey = getGroupKey(modelId, groupingMode);
     const cooldown = groups[groupKey];
 
     if (!cooldown || !cooldown.until) return true;
@@ -167,7 +173,9 @@ class TokenCooldownManager {
       // 冷却已过期，清除状态
       groups[groupKey] = null;
       this.saveToFile();
-      log.info(`[CooldownManager] Token ${tokenId} 的 ${groupKey} 系列冷却已结束`);
+      log.info(
+        `[CooldownManager] Token ${tokenId} 的 ${groupKey} 系列冷却已结束`,
+      );
       return true;
     }
 
@@ -180,13 +188,13 @@ class TokenCooldownManager {
    * @param {string} modelId - 模型 ID
    * @returns {number|null} 冷却结束时间戳，如果未在冷却中返回 null
    */
-  getCooldownUntil(tokenId, modelId) {
+  getCooldownUntil(tokenId, modelId, groupingMode = "default") {
     if (!tokenId) return null;
 
     const groups = this.cooldowns.get(tokenId);
     if (!groups) return null;
 
-    const groupKey = getGroupKey(modelId);
+    const groupKey = getGroupKey(modelId, groupingMode);
     const cooldown = groups[groupKey];
 
     if (!cooldown || !cooldown.until) return null;
@@ -204,16 +212,18 @@ class TokenCooldownManager {
    * @param {string} tokenId - Token ID
    * @param {string} modelId - 模型 ID
    */
-  clearCooldown(tokenId, modelId) {
+  clearCooldown(tokenId, modelId, groupingMode = "default") {
     if (!tokenId) return;
 
     const groups = this.cooldowns.get(tokenId);
     if (!groups) return;
 
-    const groupKey = getGroupKey(modelId);
+    const groupKey = getGroupKey(modelId, groupingMode);
     if (groups[groupKey]) {
       groups[groupKey] = null;
-      log.info(`[CooldownManager] 已清除 Token ${tokenId} 的 ${groupKey} 系列冷却状态`);
+      log.info(
+        `[CooldownManager] 已清除 Token ${tokenId} 的 ${groupKey} 系列冷却状态`,
+      );
       this.saveToFile();
     }
   }
@@ -246,7 +256,9 @@ class TokenCooldownManager {
         if (data && data.until && data.until > now) {
           validGroups[group] = {
             until: data.until,
-            untilFormatted: new Date(data.until).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+            untilFormatted: new Date(data.until).toLocaleString("zh-CN", {
+              timeZone: "Asia/Shanghai",
+            }),
           };
         }
       }
