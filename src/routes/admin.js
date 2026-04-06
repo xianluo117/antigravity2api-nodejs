@@ -59,6 +59,31 @@ function getRequestPassword(req) {
   return null;
 }
 
+function getRequestEmail(req) {
+  if (typeof req.query?.email === "string") {
+    return req.query.email;
+  }
+  if (typeof req.body?.email === "string") {
+    return req.body.email;
+  }
+
+  try {
+    const rawUrl = String(req.originalUrl || req.url || "");
+    const queryIndex = rawUrl.indexOf("?");
+    if (queryIndex >= 0) {
+      const searchParams = new URLSearchParams(rawUrl.slice(queryIndex + 1));
+      const email = searchParams.get("email");
+      if (email) {
+        return email;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return "";
+}
+
 function normalizeForbiddenMessage(value) {
   return String(value || "").replace(/\\\//g, "/");
 }
@@ -925,7 +950,7 @@ router.get(
 
 router.get("/oauth/403-accounts", async (req, res) => {
   const password = getRequestPassword(req);
-  const queryEmail = String(req.query?.email || "")
+  const queryEmail = String(getRequestEmail(req) || "")
     .trim()
     .toLowerCase();
   if (!password || !verifyPassword(password)) {
