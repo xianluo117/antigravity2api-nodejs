@@ -45,6 +45,151 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const router = express.Router();
 let proxyTestRequester = null;
+const CODE_ASSIST_AUTH_TARGET_PREFIX =
+  "https://developers.google.com/gemini-code-assist/auth/";
+const URL_MATCH_REGEX = /https?:\/\/[^\s"'<>]+/gi;
+
+function getRequestPassword(req) {
+  if (typeof req.body?.password === "string") {
+    return req.body.password;
+  }
+  if (typeof req.query?.password === "string") {
+    return req.query.password;
+  }
+  return null;
+}
+
+function normalizeForbiddenMessage(value) {
+  return String(value || "").replace(/\\\//g, "/");
+}
+
+function decodeTextVariants(value, maxDepth = 2) {
+  const normalized = normalizeForbiddenMessage(value);
+  if (!normalized) return [];
+
+  const variants = new Set([normalized]);
+  let current = normalized;
+
+  for (let i = 0; i < maxDepth; i += 1) {
+    try {
+      const decoded = decodeURIComponent(current);
+      if (!decoded || variants.has(decoded)) break;
+      variants.add(decoded);
+      current = decoded;
+    } catch {
+      break;
+    }
+  }
+
+  return Array.from(variants);
+}
+
+function urlTargetsCodeAssistAuth(rawUrl) {
+  if (!rawUrl) return false;
+
+  const candidates = decodeTextVariants(rawUrl);
+  return candidates.some((candidate) => {
+    if (candidate.includes(CODE_ASSIST_AUTH_TARGET_PREFIX)) {
+      return true;
+    }
+
+    try {
+      const parsed = new URL(candidate);
+      const continueUrl = parsed.searchParams.get("continue");
+      if (!continueUrl) return false;
+      return decodeTextVariants(continueUrl).some((item) =>
+        item.includes(CODE_ASSIST_AUTH_TARGET_PREFIX),
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
+function extractForbiddenAuthUrl(message) {
+  for (const text of decodeTextVariants(message)) {
+    const urls = text.match(URL_MATCH_REGEX) || [];
+    for (const rawUrl of urls) {
+      const cleanedUrl = rawUrl.replace(/[),.;]+$/g, "");
+      if (urlTargetsCodeAssistAuth(cleanedUrl)) {
+        return cleanedUrl;
+      }
+    }
+  }
+  return null;
+}
+
+function getForbiddenGoogleAuthMatch(token) {
+  const candidates = [
+    { field: "disableReason", value: token?.disableReason },
+    { field: "lastError", value: token?.lastError },
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeForbiddenMessage(candidate.value);
+    if (!/\b403\b/.test(normalized)) continue;
+
+    const authUrl = extractForbiddenAuthUrl(normalized);
+    if (!authUrl) continue;
+
+    return {
+      field: candidate.field,
+      message: normalized,
+      authUrl,
+    };
+  }
+
+  return null;
+}
+
+function buildForbiddenGoogleAccountList(
+  tokens,
+  source,
+  preferredEmails = new Set(),
+) {
+  const seenEmails = new Set(
+    [...preferredEmails]
+      .filter(Boolean)
+      .map((email) => String(email).trim().toLowerCase()),
+  );
+  const items = [];
+  let duplicateCount = 0;
+
+  for (const token of Array.isArray(tokens) ? tokens : []) {
+    const email = typeof token?.email === "string" ? token.email.trim() : "";
+    if (!email) continue;
+
+    const match = getForbiddenGoogleAuthMatch(token);
+    if (!match) continue;
+
+    const normalizedEmail = email.toLowerCase();
+    if (seenEmails.has(normalizedEmail)) {
+      duplicateCount += 1;
+      continue;
+    }
+
+    seenEmails.add(normalizedEmail);
+    items.push({
+      email,
+      authUrl: match.authUrl,
+      source,
+      tokenId: token.id || null,
+      enable: token.enable !== false,
+      matchedField: match.field,
+      disableReason: token.disableReason || null,
+      disableTime: token.disableTime || null,
+      lastError: token.lastError || null,
+      lastErrorTime: token.lastErrorTime || null,
+      lastErrorStage: token.lastErrorStage || null,
+    });
+  }
+
+  return {
+    items,
+    duplicateCount,
+    seenEmails,
+  };
+}
 
 function getRotationTokenLabel(tokenId) {
   return tokenId ? tokenId.slice(0, 12) : "unknown-token";
@@ -653,6 +798,52 @@ router.get(
     }
   },
 );
+
+router.get("/oauth/403-accounts", async (req, res) => {
+  const password = getRequestPassword(req);
+  if (!password || !verifyPassword(password)) {
+    return res.status(403).json({ success: false, message: "密码验证失败" });
+  }
+
+  try {
+    const [antigravityTokens, geminicliTokens] = await Promise.all([
+      tokenManager.getTokenList(),
+      geminicliTokenManager.getTokenList(),
+    ]);
+
+    const antigravityResult = buildForbiddenGoogleAccountList(
+      antigravityTokens,
+      "antigravity",
+    );
+    const geminicliResult = buildForbiddenGoogleAccountList(
+      geminicliTokens,
+      "geminicli",
+      antigravityResult.seenEmails,
+    );
+
+    res.json({
+      success: true,
+      data: {
+        passwordAuth: true,
+        priority: "antigravity",
+        targetUrlPrefix: CODE_ASSIST_AUTH_TARGET_PREFIX,
+        accounts: [...antigravityResult.items, ...geminicliResult.items],
+        antigravity: antigravityResult.items,
+        geminicli: geminicliResult.items,
+        summary: {
+          total: antigravityResult.items.length + geminicliResult.items.length,
+          antigravity: antigravityResult.items.length,
+          geminicli: geminicliResult.items.length,
+          duplicateSkipped:
+            antigravityResult.duplicateCount + geminicliResult.duplicateCount,
+        },
+      },
+    });
+  } catch (error) {
+    logger.error("获取403账号认证URL列表失败:", error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
 router.post("/tokens", cookieAuthMiddleware, async (req, res) => {
   const {
