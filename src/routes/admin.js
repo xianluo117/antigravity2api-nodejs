@@ -925,6 +925,9 @@ router.get(
 
 router.get("/oauth/403-accounts", async (req, res) => {
   const password = getRequestPassword(req);
+  const queryEmail = String(req.query?.email || "")
+    .trim()
+    .toLowerCase();
   if (!password || !verifyPassword(password)) {
     return res.status(403).json({ success: false, message: "密码验证失败" });
   }
@@ -945,10 +948,39 @@ router.get("/oauth/403-accounts", async (req, res) => {
       antigravityResult.seenEmails,
     );
 
+    const mergedAccounts = [
+      ...antigravityResult.items,
+      ...geminicliResult.items,
+    ];
+
+    if (queryEmail) {
+      const matched = mergedAccounts.find(
+        (item) =>
+          String(item.email || "")
+            .trim()
+            .toLowerCase() === queryEmail,
+      );
+
+      if (!matched) {
+        return res.status(404).json({
+          success: false,
+          message: "未找到该邮箱对应的认证URL",
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          email: matched.email,
+          url: matched.url,
+        },
+      });
+    }
+
     res.json({
       success: true,
       data: {
-        accounts: [...antigravityResult.items, ...geminicliResult.items],
+        accounts: mergedAccounts,
         antigravity: antigravityResult.items,
         geminicli: geminicliResult.items,
       },
