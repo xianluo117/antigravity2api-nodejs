@@ -171,16 +171,7 @@ function buildForbiddenGoogleAccountList(
     seenEmails.add(normalizedEmail);
     items.push({
       email,
-      authUrl: match.authUrl,
-      source,
-      tokenId: token.id || null,
-      enable: token.enable !== false,
-      matchedField: match.field,
-      disableReason: token.disableReason || null,
-      disableTime: token.disableTime || null,
-      lastError: token.lastError || null,
-      lastErrorTime: token.lastErrorTime || null,
-      lastErrorStage: token.lastErrorStage || null,
+      url: match.authUrl,
     });
   }
 
@@ -957,19 +948,9 @@ router.get("/oauth/403-accounts", async (req, res) => {
     res.json({
       success: true,
       data: {
-        passwordAuth: true,
-        priority: "antigravity",
-        targetUrlPrefix: CODE_ASSIST_AUTH_TARGET_PREFIX,
         accounts: [...antigravityResult.items, ...geminicliResult.items],
         antigravity: antigravityResult.items,
         geminicli: geminicliResult.items,
-        summary: {
-          total: antigravityResult.items.length + geminicliResult.items.length,
-          antigravity: antigravityResult.items.length,
-          geminicli: geminicliResult.items.length,
-          duplicateSkipped:
-            antigravityResult.duplicateCount + geminicliResult.duplicateCount,
-        },
       },
     });
   } catch (error) {
