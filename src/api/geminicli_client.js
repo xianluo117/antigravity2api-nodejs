@@ -17,7 +17,7 @@ import {
   parseGeminiCandidateParts,
   toOpenAIUsage,
 } from "./geminiResponseParser.js";
-import { postJsonAndParse, runAxiosSseStream } from "./geminiTransport.js";
+import { postJsonAndParse, runSseStream } from "./geminiTransport.js";
 import { convertToToolCall } from "./stream_parser.js";
 import { createStreamLineProcessor } from "./streamLineProcessor.js";
 import {
@@ -250,7 +250,7 @@ export async function generateStreamResponse(
   });
 
   try {
-    await runAxiosSseStream({
+    await runSseStream({
       url,
       headers,
       data: fullRequestBody,
@@ -299,7 +299,6 @@ export async function generateNoStreamResponse(requestBody, token, model) {
   let data;
   try {
     data = await postJsonAndParse({
-      useAxios: true,
       url,
       headers,
       body: fullRequestBody,

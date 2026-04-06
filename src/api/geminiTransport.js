@@ -1,4 +1,5 @@
 import { httpRequest, httpStreamRequest } from "../utils/httpClient.js";
+import requesterManager from "../utils/requesterManager.js";
 
 export async function runAxiosSseStream({
   url,
@@ -63,6 +64,31 @@ export async function runNativeSseStream({
   });
 }
 
+export async function runSseStream({
+  url,
+  headers,
+  data,
+  timeout,
+  proxy = null,
+  processor,
+  onErrorChunk,
+  method = "POST",
+} = {}) {
+  const streamResponse = await requesterManager.fetchStream(url, {
+    method,
+    headers,
+    body: data,
+    timeout,
+    proxy,
+  });
+
+  await runNativeSseStream({
+    streamResponse,
+    processor,
+    onErrorChunk,
+  });
+}
+
 export async function postJsonAndParse({
   useAxios,
   requester,
@@ -76,6 +102,26 @@ export async function postJsonAndParse({
   dumpFinalRawResponse,
   rawFormat = "json",
 } = {}) {
+  if (typeof useAxios !== "boolean") {
+    const { data } = await requesterManager.fetch(url, {
+      method: "POST",
+      headers,
+      body,
+      timeout,
+      proxy,
+      responseType: dumpId ? "text" : undefined,
+    });
+
+    if (dumpId) {
+      const rawText =
+        typeof data === "string" ? data : JSON.stringify(data, null, 2);
+      await dumpFinalRawResponse(dumpId, rawText, rawFormat);
+      return JSON.parse(rawText);
+    }
+
+    return data;
+  }
+
   if (useAxios) {
     if (dumpId) {
       const resp = await httpRequest({

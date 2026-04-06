@@ -1,7 +1,4 @@
-import axios from "axios";
 import crypto from "crypto";
-import path from "path";
-import { fileURLToPath } from "url";
 import config from "../config/config.js";
 import {
   GEMINICLI_OAUTH_CONFIG,
@@ -9,59 +6,9 @@ import {
   OAUTH_CONFIG,
   OAUTH_SCOPES,
 } from "../constants/oauth.js";
-import fingerprintRequester from "../requester.js";
-import { buildAxiosRequestConfig } from "../utils/httpClient.js";
 import log from "../utils/logger.js";
+import requesterManager from "../utils/requesterManager.js";
 import tokenManager from "./token_manager.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// 请求客户端：优先使用 FingerprintRequester，失败则自动降级到 axios
-let requester = null;
-let useAxios = false;
-
-if (config.useNativeAxios === true) {
-  useAxios = true;
-} else {
-  try {
-    const isPkg = typeof process.pkg !== "undefined";
-    const configPath = isPkg
-      ? path.join(path.dirname(process.execPath), "bin", "tls_config.json")
-      : path.join(__dirname, "..", "bin", "tls_config.json");
-    requester = fingerprintRequester.create({
-      configPath,
-      timeout: config.timeout ? Math.ceil(config.timeout / 1000) : 30,
-    });
-  } catch (error) {
-    log.warn(
-      "[OAuthManager] FingerprintRequester 初始化失败，自动降级使用 axios:",
-      error.message,
-    );
-    useAxios = true;
-  }
-}
-
-function buildRequesterConfig(
-  headers,
-  body = null,
-  method = "POST",
-  proxy = null,
-) {
-  const effectiveProxy =
-    proxy || (config.proxy?.allRequests ? config.proxy : null);
-  const reqConfig = {
-    method,
-    headers,
-    timeout_ms: config.timeout,
-  };
-  if (effectiveProxy) {
-    reqConfig.proxy = effectiveProxy;
-  }
-  if (body !== null) {
-    reqConfig.body = typeof body === "string" ? body : JSON.stringify(body);
-  }
-  return reqConfig;
-}
 
 class OAuthManager {
   constructor() {
@@ -115,28 +62,13 @@ class OAuthManager {
       "Accept-Encoding": "gzip",
     };
 
-    if (useAxios) {
-      const response = await axios(
-        buildAxiosRequestConfig({
-          method: "POST",
-          url: oauthConfig.TOKEN_URL,
-          headers,
-          data: postData.toString(),
-          timeout: config.timeout,
-        }),
-      );
-      return response.data;
-    }
-
-    const response = await requester.antigravity_fetch(
-      oauthConfig.TOKEN_URL,
-      buildRequesterConfig(headers, postData.toString()),
-    );
-    if (response.status !== 200) {
-      const errorBody = await response.text();
-      throw new Error(`Token交换请求失败 (${response.status}): ${errorBody}`);
-    }
-    return await response.json();
+    const { data } = await requesterManager.fetch(oauthConfig.TOKEN_URL, {
+      method: "POST",
+      headers,
+      body: postData.toString(),
+      timeout: config.timeout,
+    });
+    return data;
   }
 
   /**
@@ -151,27 +83,14 @@ class OAuthManager {
     };
 
     try {
-      if (useAxios) {
-        const response = await axios(
-          buildAxiosRequestConfig({
-            method: "GET",
-            url: "https://www.googleapis.com/oauth2/v2/userinfo",
-            headers,
-            timeout: config.timeout,
-          }),
-        );
-        return response.data?.email;
-      }
-
-      const response = await requester.antigravity_fetch(
+      const { data } = await requesterManager.fetch(
         "https://www.googleapis.com/oauth2/v2/userinfo",
-        buildRequesterConfig(headers, null, "GET"),
+        {
+          method: "GET",
+          headers,
+          timeout: config.timeout,
+        },
       );
-      if (response.status !== 200) {
-        const errorBody = await response.text();
-        throw new Error(`获取用户信息失败 (${response.status}): ${errorBody}`);
-      }
-      const data = await response.json();
       return data?.email;
     } catch (err) {
       log.warn("获取用户邮箱失败:", err.message);
