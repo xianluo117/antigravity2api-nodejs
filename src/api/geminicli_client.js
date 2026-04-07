@@ -4,6 +4,7 @@ import config from "../config/config.js";
 import { createApiError } from "../utils/errors.js";
 import { httpRequest } from "../utils/httpClient.js";
 import { saveBase64Image } from "../utils/imageStorage.js";
+import logger from "../utils/logger.js";
 import {
   collectStreamChunk,
   createDumpId,
@@ -90,6 +91,59 @@ function getGeminiCliBaseUrl() {
   }
 
   return "https://cloudcode-pa.googleapis.com";
+}
+
+function maskTokenForLog(tokenValue) {
+  const raw = String(tokenValue || "").trim();
+  if (!raw) return "(empty)";
+  if (raw.length <= 12) return `${raw.slice(0, 4)}...${raw.slice(-2)}`;
+  return `${raw.slice(0, 6)}...${raw.slice(-4)}`;
+}
+
+function stringifyErrorData(data) {
+  if (data == null) return "";
+  if (typeof data === "string") return data;
+  try {
+    return JSON.stringify(data);
+  } catch {
+    return String(data);
+  }
+}
+
+function buildGeminiCliQuotaErrorDetails(error, context = {}) {
+  const status =
+    error?.response?.status || error?.status || error?.statusCode || 500;
+  const responseData = stringifyErrorData(error?.response?.data);
+  const responseHeaders = error?.response?.headers
+    ? stringifyErrorData(error.response.headers)
+    : "";
+  const requestUrl =
+    error?.config?.url || context.url || error?.response?.config?.url || "";
+  const requestMethod =
+    error?.config?.method ||
+    context.method ||
+    error?.response?.config?.method ||
+    "POST";
+  const projectId = context.token?.projectId || "";
+  const email = context.token?.email || "";
+  const tokenId = context.tokenId || "";
+  const accessTokenMasked = maskTokenForLog(context.token?.access_token);
+
+  return [
+    `[GeminiCLI] 获取额度失败`,
+    `status=${status}`,
+    `method=${String(requestMethod).toUpperCase()}`,
+    requestUrl ? `url=${requestUrl}` : null,
+    tokenId ? `tokenId=${tokenId}` : null,
+    email ? `email=${email}` : null,
+    projectId ? `projectId=${projectId}` : null,
+    `accessToken=${accessTokenMasked}`,
+    responseData ? `response=${responseData}` : null,
+    responseHeaders ? `headers=${responseHeaders}` : null,
+    error?.message ? `message=${error.message}` : null,
+  ]
+    .filter(Boolean)
+    .join(" | ");
 }
 
 /**
@@ -451,6 +505,14 @@ export async function getGeminiCliQuotas(token) {
 
     return quotas;
   } catch (primaryError) {
+    logger.warn(
+      buildGeminiCliQuotaErrorDetails(primaryError, {
+        token,
+        url: `${baseUrl}/v1internal:retrieveUserQuota`,
+        method: "POST",
+      }),
+    );
+
     // retrieveUserQuota 失败，尝试 fetchAvailableModels 回退
     const primaryStatus =
       primaryError.response?.status ||
@@ -502,6 +564,13 @@ export async function getGeminiCliQuotas(token) {
 
       return quotas;
     } catch (fallbackError) {
+      logger.warn(
+        buildGeminiCliQuotaErrorDetails(fallbackError, {
+          token,
+          url: `${baseUrl}/v1internal:fetchAvailableModels`,
+          method: "POST",
+        }),
+      );
       // 两个接口都失败了，抛出原始错误
       throw primaryError;
     }

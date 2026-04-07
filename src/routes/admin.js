@@ -2640,7 +2640,18 @@ router.get(
     } catch (error) {
       const status =
         error.statusCode || error.status || error.response?.status || 500;
-      logger.error("[GeminiCLI] 获取额度失败:", error.message);
+      const responseData =
+        typeof error.response?.data === "string"
+          ? error.response.data
+          : error.response?.data
+            ? JSON.stringify(error.response.data)
+            : "";
+      const responseHeaders = error.response?.headers
+        ? JSON.stringify(error.response.headers)
+        : "";
+      logger.error(
+        `[GeminiCLI] 获取额度失败 | status=${status} | tokenId=${tokenId} | email=${tokenData?.email || ""} | projectId=${tokenData?.projectId || ""} | response=${responseData || "(empty)"} | headers=${responseHeaders || "(empty)"} | message=${error.message}`,
+      );
       res.status(status).json({ success: false, message: error.message });
     }
   },
