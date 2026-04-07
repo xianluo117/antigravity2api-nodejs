@@ -617,6 +617,7 @@ function renderGeminiCliTokens(tokens) {
                     <button class="btn-icon token-refresh-btn" onclick="refreshGeminiCliToken('${safeTokenId}')" title="刷新Token">🔄</button>
                 </div>
                 <div class="token-header-right">
+                    <button class="btn-icon" onclick="showGeminiCliTokenDetail('${safeTokenId}')" title="编辑">✏️</button>
                     ${tierLabel ? `<span class="token-tier-badge">${tierLabel}</span>` : ""}
                     <span class="token-id">#${tokenNumber}</span>
                 </div>
@@ -833,10 +834,7 @@ function editGeminiCliField(event, tokenId, field, currentValue) {
 
   const save = async () => {
     const newValue = input.value.trim();
-    if (
-      (field === "access_token" || field === "refresh_token") &&
-      !newValue
-    ) {
+    if ((field === "access_token" || field === "refresh_token") && !newValue) {
       showToast(`${fieldLabels[field]}不能为空`, "warning");
       input.focus();
       return;
@@ -895,6 +893,156 @@ function editGeminiCliField(event, tokenId, field, currentValue) {
       cancel();
     }
   });
+}
+
+function showGeminiCliTokenDetail(tokenId) {
+  const token = cachedGeminiCliTokens.find((t) => t.id === tokenId);
+  if (!token) {
+    showToast("Token不存在", "error");
+    return;
+  }
+
+  const safeTokenId = escapeJs(tokenId);
+  const safeEmail = escapeHtml(token.email || "");
+  const safeAccessToken = escapeHtml(token.access_token || "");
+  const safeRefreshToken = escapeHtml(token.refresh_token || "");
+  const safeProjectId = escapeHtml(token.projectId || "");
+  const updatedAtStr = escapeHtml(
+    token.timestamp
+      ? new Date(token.timestamp).toLocaleString("zh-CN")
+      : "未知",
+  );
+  const disableReason = token.disableReason
+    ? escapeHtml(token.disableReason)
+    : "";
+  const disableTimeStr = token.disableTime
+    ? new Date(token.disableTime).toLocaleString("zh-CN")
+    : "";
+  const lastError = token.lastError ? escapeHtml(token.lastError) : "";
+  const lastErrorTimeStr = token.lastErrorTime
+    ? new Date(token.lastErrorTime).toLocaleString("zh-CN")
+    : "";
+  const lastErrorStageLabel =
+    token.lastErrorStage === "startup_refresh"
+      ? "启动检测"
+      : token.lastErrorStage === "disable"
+        ? "禁用"
+        : token.lastErrorStage === "manual"
+          ? "手动"
+          : token.lastErrorStage === "request"
+            ? "请求"
+            : token.lastErrorStage === "enable_test"
+              ? "启用验证"
+              : token.lastErrorStage === "oauth_submit"
+                ? "OAuth提交校验"
+                : token.lastErrorStage || "";
+
+  const modal = document.createElement("div");
+  modal.className = "modal form-modal";
+  modal.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-title">📝 CLI凭证详情</div>
+            <div class="form-group compact">
+                <label>🔑 Token ID</label>
+                <div class="token-display">${escapeHtml(tokenId)}</div>
+            </div>
+            <div class="form-group compact">
+                <label>📧 邮箱</label>
+                <input type="email" id="editGeminiCliEmail" value="${safeEmail}" placeholder="账号邮箱">
+            </div>
+            <div class="form-group compact">
+                <label>🔐 Access Token</label>
+                <textarea id="editGeminiCliAccessToken" rows="4" placeholder="Access Token">${safeAccessToken}</textarea>
+            </div>
+            <div class="form-group compact">
+                <label>🔄 Refresh Token</label>
+                <textarea id="editGeminiCliRefreshToken" rows="4" placeholder="Refresh Token">${safeRefreshToken}</textarea>
+            </div>
+            <div class="form-group compact">
+                <label>📁 Project ID</label>
+                <input type="text" value="${safeProjectId}" readonly style="background: var(--bg); cursor: not-allowed;">
+            </div>
+            <div class="form-group compact">
+                <label>🕒 最后更新时间</label>
+                <input type="text" value="${updatedAtStr}" readonly style="background: var(--bg); cursor: not-allowed;">
+            </div>
+            ${
+              lastError
+                ? `
+            <div class="form-group compact">
+                <label>🧾 最近错误</label>
+                <div class="token-error-detail" style="max-height: 8em; overflow-y: auto;">
+                    ${lastError}
+                    ${lastErrorTimeStr || lastErrorStageLabel ? `<br><span class="token-error-meta">${lastErrorTimeStr ? "记录时间: " + lastErrorTimeStr : ""}${lastErrorTimeStr && lastErrorStageLabel ? " · " : ""}${lastErrorStageLabel ? "来源: " + lastErrorStageLabel : ""}</span>` : ""}
+                </div>
+                ${render403ActionUrls(token.lastError || "")}
+            </div>
+            `
+                : ""
+            }
+            ${
+              !token.enable && disableReason
+                ? `
+            <div class="form-group compact">
+                <label>⚠️ 禁用原因</label>
+                <div class="token-disable-detail" style="padding: 0.5rem; background: var(--danger-bg, rgba(220,53,69,0.1)); border-radius: 6px; font-size: 0.85rem; color: var(--danger, #dc3545); word-break: break-all; max-height: 8em; overflow-y: auto;">${disableReason}${disableTimeStr ? '<br><span style="color: var(--text-light); font-size: 0.8rem;">禁用时间: ' + disableTimeStr + "</span>" : ""}</div>
+                ${render403ActionUrls(token.disableReason || "")}
+            </div>
+            `
+                : ""
+            }
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">取消</button>
+                <button class="btn btn-success" onclick="saveGeminiCliTokenDetail('${safeTokenId}')">💾 保存</button>
+            </div>
+        </div>
+    `;
+  document.body.appendChild(modal);
+  modal.onclick = (e) => {
+    if (e.target === modal) modal.remove();
+  };
+}
+
+async function saveGeminiCliTokenDetail(tokenId) {
+  const email = document.getElementById("editGeminiCliEmail").value.trim();
+  const access_token = document
+    .getElementById("editGeminiCliAccessToken")
+    .value.trim();
+  const refresh_token = document
+    .getElementById("editGeminiCliRefreshToken")
+    .value.trim();
+
+  if (!access_token || !refresh_token) {
+    showToast("Access Token 和 Refresh Token 不能为空", "warning");
+    return;
+  }
+
+  showLoading("保存中...");
+  try {
+    const response = await authFetch(
+      `/admin/geminicli/tokens/${encodeURIComponent(tokenId)}`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, access_token, refresh_token }),
+      },
+    );
+
+    const data = await response.json();
+    hideLoading();
+    if (data.success) {
+      document.querySelector(".form-modal").remove();
+      showToast("保存成功", "success");
+      loadGeminiCliTokens();
+    } else {
+      showToast(data.message || "保存失败", "error");
+    }
+  } catch (error) {
+    hideLoading();
+    showToast("保存失败: " + error.message, "error");
+  }
 }
 
 // 切换 Gemini CLI Token 状态
