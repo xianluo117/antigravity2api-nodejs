@@ -1282,6 +1282,8 @@ class GeminiCliTokenManager {
 
       return allTokens.map((token) => ({
         id: generateTokenId(token.refresh_token, salt),
+        access_token: token.access_token || null,
+        refresh_token: token.refresh_token || null,
         expires_in: token.expires_in,
         timestamp: token.timestamp,
         enable: token.enable !== false,
