@@ -960,7 +960,7 @@ function showGeminiCliTokenDetail(tokenId) {
             </div>
             <div class="form-group compact">
                 <label>📁 Project ID</label>
-                <input type="text" value="${safeProjectId}" readonly style="background: var(--bg); cursor: not-allowed;">
+                <input type="text" id="editGeminiCliProjectId" value="${safeProjectId}" placeholder="Project ID">
             </div>
             <div class="form-group compact">
                 <label>🕒 最后更新时间</label>
@@ -1011,6 +1011,9 @@ async function saveGeminiCliTokenDetail(tokenId) {
   const refresh_token = document
     .getElementById("editGeminiCliRefreshToken")
     .value.trim();
+  const projectId = document
+    .getElementById("editGeminiCliProjectId")
+    .value.trim();
 
   if (!access_token || !refresh_token) {
     showToast("Access Token 和 Refresh Token 不能为空", "warning");
@@ -1026,7 +1029,12 @@ async function saveGeminiCliTokenDetail(tokenId) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email, access_token, refresh_token }),
+        body: JSON.stringify({
+          email,
+          access_token,
+          refresh_token,
+          projectId,
+        }),
       },
     );
 
