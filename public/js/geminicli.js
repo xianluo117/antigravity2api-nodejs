@@ -629,6 +629,16 @@ function renderGeminiCliTokens(tokens) {
                     <span class="info-value sensitive-info">${safeEmail || "点击设置"}</span>
                     <span class="info-edit-icon">✏️</span>
                 </div>
+                <div class="info-row editable sensitive-row" onclick="editGeminiCliField(event, '${safeTokenId}', 'access_token', '${escapeJs(token.access_token || "")}')" title="点击编辑 Access Token">
+                    <span class="info-label">🔐</span>
+                    <span class="info-value sensitive-info">${escapeHtml(token.access_token || "点击设置")}</span>
+                    <span class="info-edit-icon">✏️</span>
+                </div>
+                <div class="info-row editable sensitive-row" onclick="editGeminiCliField(event, '${safeTokenId}', 'refresh_token', '${escapeJs(token.refresh_token || "")}')" title="点击编辑 Refresh Token">
+                    <span class="info-label">🔄</span>
+                    <span class="info-value sensitive-info">${escapeHtml(token.refresh_token || "点击设置")}</span>
+                    <span class="info-edit-icon">✏️</span>
+                </div>
                 <div class="info-row ${hasProjectId ? "" : "warning"}" title="${hasProjectId ? "Project ID" : "缺少 Project ID，点击获取"}">
                     <span class="info-label">📁</span>
                     <span class="info-value ${hasProjectId ? "" : "text-warning"}">${safeProjectId || "未获取"}</span>
@@ -797,13 +807,24 @@ function editGeminiCliField(event, tokenId, field, currentValue) {
 
   if (row.querySelector("input")) return;
 
-  const fieldLabels = { email: "邮箱" };
+  const fieldLabels = {
+    email: "邮箱",
+    access_token: "Access Token",
+    refresh_token: "Refresh Token",
+  };
+  const inputTypes = {
+    email: "email",
+    access_token: "text",
+    refresh_token: "text",
+  };
 
   const input = document.createElement("input");
-  input.type = "email";
+  input.type = inputTypes[field] || "text";
   input.value = currentValue;
   input.className = "inline-edit-input";
-  input.placeholder = `输入${fieldLabels[field]}`;
+  input.placeholder = `输入${fieldLabels[field] || field}`;
+  input.autocomplete = "off";
+  input.spellcheck = false;
 
   valueSpan.style.display = "none";
   row.insertBefore(input, valueSpan.nextSibling);
@@ -812,6 +833,15 @@ function editGeminiCliField(event, tokenId, field, currentValue) {
 
   const save = async () => {
     const newValue = input.value.trim();
+    if (
+      (field === "access_token" || field === "refresh_token") &&
+      !newValue
+    ) {
+      showToast(`${fieldLabels[field]}不能为空`, "warning");
+      input.focus();
+      return;
+    }
+
     input.disabled = true;
 
     try {

@@ -2318,10 +2318,6 @@ router.put(
     const { tokenId } = req.params;
     const updates = req.body;
 
-    // 不允许通过 API 更新敏感字段
-    delete updates.access_token;
-    delete updates.refresh_token;
-
     try {
       // 如果是从禁用状态启用，且请求中包含 enableWithTest 标志，则先测试可用性
       if (updates.enable === true && updates.enableWithTest) {
