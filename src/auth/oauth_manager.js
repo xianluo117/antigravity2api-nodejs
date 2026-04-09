@@ -25,16 +25,20 @@ class OAuthManager {
       mode === "geminicli" ? GEMINICLI_OAUTH_CONFIG : OAUTH_CONFIG;
     const scopes = mode === "geminicli" ? GEMINICLI_OAUTH_SCOPES : OAUTH_SCOPES;
 
-    const params = new URLSearchParams({
-      access_type: "offline",
-      client_id: oauthConfig.CLIENT_ID,
-      prompt: "consent",
-      redirect_uri: `http://localhost:${port}/oauth-callback`,
-      response_type: "code",
-      scope: scopes.join(" "),
-      state: `${this.state}_${mode}`, // 在 state 中包含 mode 信息
-    });
-    return `${oauthConfig.AUTH_URL}?${params.toString()}`;
+    // 使用与前端一致的 URL 构建方式（encodeURIComponent 编码，空格为 %20）
+    const redirectUri = `http://localhost:${port}/oauth-callback`;
+    const scopeStr = scopes.join(" ");
+    const state =
+      mode === "geminicli"
+        ? `geminicli_${Date.now()}_${port}`
+        : `${Date.now()}_${port}`;
+
+    return (
+      `${oauthConfig.AUTH_URL}?` +
+      `access_type=offline&client_id=${oauthConfig.CLIENT_ID}&prompt=consent&` +
+      `redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&` +
+      `scope=${encodeURIComponent(scopeStr)}&state=${state}`
+    );
   }
 
   /**
@@ -171,7 +175,7 @@ class OAuthManager {
    * @param {number} port - 回调端口
    */
   async authenticateGeminiCli(code, port) {
-    return this.authenticate(code, port, "GeminiCLI");
+    return this.authenticate(code, port, "geminicli");
   }
 }
 
