@@ -287,8 +287,9 @@ class TokenManager {
   async fetchProjectId(token) {
     // 步骤1: 尝试 loadCodeAssist
     try {
-      const { projectId, sub } = (await this._tryLoadCodeAssist(token)) || {};
-      if (projectId) return { projectId, sub };
+      const { projectId, sub, credits } =
+        (await this._tryLoadCodeAssist(token)) || {};
+      if (projectId) return { projectId, sub, credits };
       log.warn(
         "[fetchProjectId] loadCodeAssist 未返回 projectId，回退到 onboardUser",
       );
@@ -301,7 +302,7 @@ class TokenManager {
     // 步骤2: 回退到 onboardUser
     try {
       const { projectId, sub } = (await this._tryOnboardUser(token)) || {};
-      if (projectId) return { projectId, sub };
+      if (projectId) return { projectId, sub, credits: null };
       log.error(
         "[fetchProjectId] loadCodeAssist 和 onboardUser 均未能获取 projectId",
       );
@@ -356,7 +357,19 @@ class TokenManager {
       if (projectId) {
         log.info(`[loadCodeAssist] 成功获取 projectId: ${projectId}`);
         sub = data.currentTier.id;
-        return { projectId, sub };
+        let credits = null;
+        if (
+          sub !== "free-tier" &&
+          data?.paidTier?.availableCredits?.[0]?.creditAmount
+        ) {
+          const parsedCredits = parseFloat(
+            data.paidTier.availableCredits[0].creditAmount,
+          );
+          if (Number.isFinite(parsedCredits)) {
+            credits = parsedCredits;
+          }
+        }
+        return { projectId, sub, credits };
       }
       log.warn("[loadCodeAssist] 响应中无 projectId");
       return null;
@@ -1458,6 +1471,11 @@ class TokenManager {
         projectId: token.projectId || null,
         email: token.email || null,
         hasQuota: token.hasQuota !== false,
+        sub: token.sub || null,
+        credits:
+          token.credits !== null && token.credits !== undefined
+            ? token.credits
+            : null,
         disableReason: token.disableReason || null,
         disableTime: token.disableTime || null,
         lastError: token.lastError || null,

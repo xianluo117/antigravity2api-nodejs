@@ -487,6 +487,8 @@ export function buildConfig(jsonConfig) {
     cacheThinking: jsonConfig.other?.cacheThinking !== false,
     // 假非流：非流式请求使用流式获取数据后返回非流式格式（默认启用）
     fakeNonStream: jsonConfig.other?.fakeNonStream !== false,
+    // 总是使用积分：每次请求都注入 Google One AI 积分（默认关闭）
+    alwaysUseCredits: jsonConfig.other?.alwaysUseCredits === true,
     // 调试：完整打印最终请求体与原始响应（可能包含敏感内容/大体积数据，只从环境变量读取）
     debugDumpRequestResponse: process.env.DEBUG_DUMP_REQUEST_RESPONSE === "1",
 

@@ -32,12 +32,12 @@
       "recordCodeAssistMetrics": "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:recordCodeAssistMetrics"
     },
     "production": {
-      "url": "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
-      "modelsUrl": "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
-      "noStreamUrl": "https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent",
-      "host": "daily-cloudcode-pa.googleapis.com",
-      "recordTrajectory": "https://daily-cloudcode-pa.googleapis.com/v1internal:recordTrajectoryAnalytics",
-      "recordCodeAssistMetrics": "https://daily-cloudcode-pa.googleapis.com/v1internal:recordCodeAssistMetrics"
+      "url": "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
+      "modelsUrl": "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+      "noStreamUrl": "https://cloudcode-pa.googleapis.com/v1internal:generateContent",
+      "host": "cloudcode-pa.googleapis.com",
+      "recordTrajectory": "https://cloudcode-pa.googleapis.com/v1internal:recordTrajectoryAnalytics",
+      "recordCodeAssistMetrics": "https://cloudcode-pa.googleapis.com/v1internal:recordCodeAssistMetrics"
     }
   },
   "defaults": {
@@ -69,6 +69,7 @@
     "cacheToolSignatures": true,
     "cacheImageSignatures": true,
     "cacheThinking": true,
-    "fakeNonStream": true
+    "fakeNonStream": true,
+    "alwaysUseCredits": false
   }
 }

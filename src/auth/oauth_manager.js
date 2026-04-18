@@ -156,12 +156,14 @@ class OAuthManager {
 
     // 3. 资格校验（仅 antigravity 模式需要 projectId）
     if (mode === "antigravity") {
-      const { projectId, hasQuota, sub } = await this.validateAndGetProjectId(
-        account.access_token,
-      );
+      const { projectId, hasQuota, sub, credits } =
+        await this.validateAndGetProjectId(account.access_token);
       account.projectId = projectId;
       account.hasQuota = hasQuota;
       account.sub = sub;
+      if (credits !== null && credits !== undefined) {
+        account.credits = credits;
+      }
     }
 
     account.enable = true;

@@ -92,7 +92,9 @@ export const handleClaudeRequest = async (req, res, isStream) => {
       onAttempt: () => tokenManager.recordRequest(token, actualModel),
       tokenId,
       modelId: actualModel,
-      refreshQuota
+      refreshQuota,
+      tokenManager,
+      token,
     });
 
     // 使用统一参数规范化模块处理 Claude 格式参数
@@ -137,7 +139,13 @@ export const handleClaudeRequest = async (req, res, isStream) => {
         if (isImageModel) {
           // 生图模型：使用非流式获取结果后以流式格式返回
           const { content, usage } = await with429Retry(
-            () => generateAssistantResponseNoStream(requestBody, token),
+            (attempt, shouldUseCredits) =>
+              generateAssistantResponseNoStream(
+                shouldUseCredits
+                  ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                  : requestBody,
+                token,
+              ),
             safeRetries,
             createRetryOptions('claude.stream.image ')
           );
@@ -174,7 +182,12 @@ export const handleClaudeRequest = async (req, res, isStream) => {
         }
 
         await with429Retry(
-          () => generateAssistantResponse(requestBody, token, (data) => {
+          (attempt, shouldUseCredits) => generateAssistantResponse(
+            shouldUseCredits
+              ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+              : requestBody,
+            token,
+            (data) => {
             if (data.type === 'usage') {
               usageData = data.usage;
             } else if (data.type === 'reasoning') {
@@ -336,7 +349,12 @@ export const handleClaudeRequest = async (req, res, isStream) => {
 
       try {
         await with429Retry(
-          () => generateAssistantResponse(requestBody, token, (data) => {
+          (attempt, shouldUseCredits) => generateAssistantResponse(
+            shouldUseCredits
+              ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+              : requestBody,
+            token,
+            (data) => {
             if (data.type === 'usage') {
               usageData = data.usage;
             } else if (data.type === 'reasoning') {
@@ -380,7 +398,13 @@ export const handleClaudeRequest = async (req, res, isStream) => {
       res.setTimeout(0);
 
       const { content, reasoningContent, reasoningSignature, toolCalls, usage } = await with429Retry(
-        () => generateAssistantResponseNoStream(requestBody, token),
+        (attempt, shouldUseCredits) =>
+          generateAssistantResponseNoStream(
+            shouldUseCredits
+              ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+              : requestBody,
+            token,
+          ),
         safeRetries,
         createRetryOptions('claude.no_stream ')
       );

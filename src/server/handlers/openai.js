@@ -81,6 +81,8 @@ export const handleOpenAIRequest = async (req, res) => {
       tokenId,
       modelId: actualModel,
       refreshQuota,
+      tokenManager,
+      token,
     });
 
     const isImageModel = actualModel.includes("-image");
@@ -108,7 +110,13 @@ export const handleOpenAIRequest = async (req, res) => {
       try {
         if (isImageModel) {
           const { content, usage, reasoningSignature } = await with429Retry(
-            () => generateAssistantResponseNoStream(requestBody, token),
+            (attempt, shouldUseCredits) =>
+              generateAssistantResponseNoStream(
+                shouldUseCredits
+                  ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                  : requestBody,
+                token,
+              ),
             safeRetries,
             createRetryOptions("chat.stream.image "),
           );
@@ -129,8 +137,13 @@ export const handleOpenAIRequest = async (req, res) => {
           let usageData = null;
 
           await with429Retry(
-            () =>
-              generateAssistantResponse(requestBody, token, (data) => {
+            (attempt, shouldUseCredits) =>
+              generateAssistantResponse(
+                shouldUseCredits
+                  ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                  : requestBody,
+                token,
+                (data) => {
                 if (data.type === "usage") {
                   usageData = data.usage;
                 } else if (data.type === "reasoning") {
@@ -167,7 +180,7 @@ export const handleOpenAIRequest = async (req, res) => {
                     createStreamChunk(id, created, responseModel, delta),
                   );
                 }
-              }),
+                }),
             safeRetries,
             createRetryOptions("chat.stream "),
           );
@@ -209,8 +222,13 @@ export const handleOpenAIRequest = async (req, res) => {
 
       try {
         await with429Retry(
-          () =>
-            generateAssistantResponse(requestBody, token, (data) => {
+          (attempt, shouldUseCredits) =>
+            generateAssistantResponse(
+              shouldUseCredits
+                ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                : requestBody,
+              token,
+              (data) => {
               if (data.type === "usage") {
                 usageData = data.usage;
               } else if (data.type === "reasoning") {
@@ -223,7 +241,7 @@ export const handleOpenAIRequest = async (req, res) => {
               } else if (data.type === "text") {
                 content += data.content || "";
               }
-            }),
+              }),
           safeRetries,
           createRetryOptions("chat.fake_no_stream "),
         );
@@ -279,7 +297,13 @@ export const handleOpenAIRequest = async (req, res) => {
         toolCalls,
         usage,
       } = await with429Retry(
-        () => generateAssistantResponseNoStream(requestBody, token),
+        (attempt, shouldUseCredits) =>
+          generateAssistantResponseNoStream(
+            shouldUseCredits
+              ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+              : requestBody,
+            token,
+          ),
         safeRetries,
         createRetryOptions("chat.no_stream "),
       );

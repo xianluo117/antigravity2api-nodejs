@@ -15,6 +15,7 @@ import memoryManager, {
   registerMemoryPoolCleanup,
 } from "../utils/memoryManager.js";
 import { getGroupKey } from "../utils/modelGroups.js";
+import { hasOtherAvailableModelGroups, getAvailableModelGroups } from "../utils/tokenQuotaHelper.js";
 
 // ==================== 心跳机制（防止 CF 超时） ====================
 const HEARTBEAT_INTERVAL =
@@ -328,6 +329,8 @@ function isRetryableError(status, error) {
  * @param {string} options.tokenId - Token ID（用于模型系列禁用）
  * @param {string} options.modelId - 模型 ID（用于模型系列禁用）
  * @param {Function} options.refreshQuota - 刷新额度的回调函数（当需要获取准确恢复时间时调用）
+ * @param {Object} options.tokenManager - TokenManager 实例（用于级联配额耗尽标记）
+ * @param {Object} options.token - Token 对象（用于级联配额耗尽标记）
  * @returns {Promise<any>}
  */
 export async function with429Retry(
@@ -343,6 +346,8 @@ export async function with429Retry(
   let modelId = null;
   let refreshQuota = null;
   let groupingMode = "default";
+  let tokenManager = null;
+  let token = null;
 
   if (typeof options === "string") {
     // 旧版调用方式
@@ -355,6 +360,8 @@ export async function with429Retry(
     modelId = options.modelId || null;
     refreshQuota = options.refreshQuota || null;
     groupingMode = options.groupingMode || "default";
+    tokenManager = options.tokenManager || null;
+    token = options.token || null;
   }
 
   const retries =
@@ -362,6 +369,7 @@ export async function with429Retry(
   const cooldownThreshold =
     config.quota?.longCooldownThreshold || LONG_COOLDOWN_THRESHOLD;
   let attempt = 0;
+  let shouldUseCredits = false;
 
   // 首次执行 + 最多 retries 次重试
   while (true) {
@@ -370,7 +378,7 @@ export async function with429Retry(
       if (typeof onAttempt === "function") {
         onAttempt(attempt);
       }
-      return await fn(attempt);
+      return await fn(attempt, shouldUseCredits);
     } catch (error) {
       // 兼容多种错误格式：error.status, error.statusCode, error.response?.status
       const status = Number(
@@ -445,6 +453,28 @@ export async function with429Retry(
               finalResetTimestamp,
               groupingMode,
             );
+
+            // 级联检查：所有核心模型组都被禁用时，标记整个 token 配额耗尽
+            const hasOtherModels = hasOtherAvailableModelGroups(tokenId, groupingMode);
+
+            if (!hasOtherModels) {
+              logger.warn(
+                `${loggerPrefix}Token ${tokenId} 的所有核心模型组都已禁用，标记为配额耗尽`,
+              );
+              if (tokenManager && token && typeof tokenManager.markQuotaExhausted === "function") {
+                try {
+                  tokenManager.markQuotaExhausted(token);
+                } catch (e) {
+                  logger.error(`${loggerPrefix}标记 token 配额耗尽失败: ${e.message}`);
+                }
+              }
+            } else {
+              const availableGroups = getAvailableModelGroups(tokenId, groupingMode);
+              logger.info(
+                `${loggerPrefix}Token ${tokenId} 仍有其他可用模型组: ${availableGroups.join(", ")}`,
+              );
+            }
+
             // 不重试，直接抛出错误
             throw error;
           }
@@ -452,13 +482,22 @@ export async function with429Retry(
 
         // 短时间等待，正常重试
         if (attempt < retries) {
+          if (!shouldUseCredits) {
+            shouldUseCredits = true;
+            logger.warn(
+              `${loggerPrefix}收到 ${errorType}，优先尝试使用 Google One AI 积分重试`,
+            );
+            continue;
+          }
+
           const nextAttempt = attempt + 1;
           const waitMs = computeBackoffMs(nextAttempt, explicitDelayMs);
           logger.warn(
             `${loggerPrefix}收到 ${errorType}，等待 ${waitMs}ms 后进行第 ${nextAttempt} 次重试（共 ${retries} 次）` +
               (explicitDelayMs !== null
                 ? `（上游提示≈${explicitDelayMs}ms）`
-                : ""),
+                : "") +
+              (shouldUseCredits ? "（使用积分）" : ""),
           );
           await sleep(waitMs);
           attempt = nextAttempt;

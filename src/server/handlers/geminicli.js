@@ -89,6 +89,8 @@ export const handleGeminiCliRequest = async (req, res, forceFormat = null) => {
       modelId: actualModel,
       refreshQuota,
       groupingMode: "geminicli",
+      tokenManager: geminicliTokenManager,
+      token,
     });
 
     // 假流式模式：使用非流式 API 获取数据，然后模拟流式输出

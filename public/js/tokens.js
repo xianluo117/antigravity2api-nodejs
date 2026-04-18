@@ -1244,6 +1244,8 @@ function renderTokens(tokens) {
                     <span class="status ${token.enable ? "enabled" : "disabled"}">
                         ${token.enable ? "✅ 启用" : "❌ 禁用"}
                     </span>
+                    ${token.sub ? `<span class="status-subscription subscription-badge ${token.sub === "free-tier" ? "free-tier" : "paid-tier"}" title="订阅类型">${escapeHtml(token.sub)}</span>` : ""}
+                    ${token.credits !== null && token.credits !== undefined ? `<span class="status-credits" title="剩余积分">🪙 ${Number(token.credits).toFixed(2)}</span>` : '<span class="status-credits no-credits" title="无积分信息">🪙 -</span>'}
                     <button class="btn-icon token-refresh-btn ${isRefreshing ? "loading" : ""}" id="refresh-btn-${escapeHtml(cardId)}" onclick="manualRefreshToken('${safeTokenId}')" title="刷新Token" ${isRefreshing ? "disabled" : ""}>🔄</button>
                 </div>
                 <div class="token-header-right">

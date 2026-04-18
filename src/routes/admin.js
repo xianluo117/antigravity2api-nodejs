@@ -1402,8 +1402,47 @@ router.post(
     const { tokenId } = req.params;
     try {
       const result = await tokenManager.refreshTokenById(tokenId);
+
+      let subscriptionData = null;
+      try {
+        const tokenData = await tokenManager.findTokenById(tokenId);
+        if (tokenData) {
+          const projectResult = await tokenManager.fetchProjectId(tokenData);
+          if (projectResult) {
+            const updates = {
+              sub: projectResult.sub || "free-tier",
+              credits:
+                projectResult.credits !== null &&
+                projectResult.credits !== undefined
+                  ? projectResult.credits
+                  : null,
+            };
+
+            if (projectResult.projectId) {
+              updates.projectId = projectResult.projectId;
+              updates.hasQuota = true;
+            }
+
+            await tokenManager.updateTokenById(tokenId, updates);
+            subscriptionData = {
+              sub: updates.sub,
+              credits: updates.credits,
+              projectId: updates.projectId || null,
+            };
+          }
+        }
+      } catch (subscriptionError) {
+        logger.warn(
+          `刷新Token后同步订阅/积分信息失败: ${subscriptionError.message}`,
+        );
+      }
+
       logger.info(`手动刷新Token: ${tokenId}`);
-      res.json({ success: true, message: "Token刷新成功", data: result });
+      res.json({
+        success: true,
+        message: "Token刷新成功",
+        data: subscriptionData ? { ...result, ...subscriptionData } : result,
+      });
     } catch (error) {
       logger.error("刷新Token失败:", error.message);
       const status = error.statusCode || 500;

@@ -174,6 +174,8 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
       tokenId,
       modelId: actualModel,
       refreshQuota,
+      tokenManager,
+      token,
     });
 
     const isImageModel = actualModel.includes("-image");
@@ -191,7 +193,13 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
         if (isImageModel) {
           // 生图模型：使用非流式获取结果后一次性返回
           const { content, usage, reasoningSignature } = await with429Retry(
-            () => generateAssistantResponseNoStream(requestBody, token),
+            (attempt, shouldUseCredits) =>
+              generateAssistantResponseNoStream(
+                shouldUseCredits
+                  ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                  : requestBody,
+                token,
+              ),
             safeRetries,
             createRetryOptions("gemini.stream.image "),
           );
@@ -214,8 +222,13 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
         let hasToolCall = false;
 
         await with429Retry(
-          () =>
-            generateAssistantResponse(requestBody, token, (data) => {
+          (attempt, shouldUseCredits) =>
+            generateAssistantResponse(
+              shouldUseCredits
+                ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                : requestBody,
+              token,
+              (data) => {
               if (data.type === "usage") {
                 usageData = data.usage;
               } else if (data.type === "reasoning") {
@@ -256,7 +269,7 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
                 );
                 writeStreamData(res, chunk);
               }
-            }),
+              }),
           safeRetries,
           createRetryOptions("gemini.stream "),
         );
@@ -299,8 +312,13 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
 
       try {
         await with429Retry(
-          () =>
-            generateAssistantResponse(requestBody, token, (data) => {
+          (attempt, shouldUseCredits) =>
+            generateAssistantResponse(
+              shouldUseCredits
+                ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+                : requestBody,
+              token,
+              (data) => {
               if (data.type === "usage") {
                 usageData = data.usage;
               } else if (data.type === "reasoning") {
@@ -313,7 +331,7 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
               } else if (data.type === "text") {
                 content += data.content || "";
               }
-            }),
+              }),
           safeRetries,
           createRetryOptions("gemini.fake_no_stream "),
         );
@@ -347,7 +365,13 @@ export const handleGeminiRequest = async (req, res, modelName, isStream) => {
         toolCalls,
         usage,
       } = await with429Retry(
-        () => generateAssistantResponseNoStream(requestBody, token),
+        (attempt, shouldUseCredits) =>
+          generateAssistantResponseNoStream(
+            shouldUseCredits
+              ? { ...requestBody, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+              : requestBody,
+            token,
+          ),
         safeRetries,
         createRetryOptions("gemini.no_stream "),
       );
