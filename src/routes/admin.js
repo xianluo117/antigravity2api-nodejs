@@ -1356,6 +1356,8 @@ router.post("/tokens/batch", cookieAuthMiddleware, async (req, res) => {
             message: "额度刷新成功",
             modelCount: Object.keys(quotas || {}).length,
           };
+        } else if (action === "delete") {
+          result = await tokenManager.deleteTokenById(tokenId);
         } else {
           return res.status(400).json({
             success: false,
@@ -2464,6 +2466,8 @@ router.post(
               message: "额度刷新成功",
               modelCount: Object.keys(quotas || {}).length,
             };
+          } else if (action === "delete") {
+            result = await geminicliTokenManager.deleteTokenById(tokenId);
           } else {
             return res.status(400).json({
               success: false,

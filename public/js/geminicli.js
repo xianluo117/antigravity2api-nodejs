@@ -229,6 +229,14 @@ async function batchReloadSelectedGeminiCliTokens() {
   });
 }
 
+async function batchDeleteSelectedGeminiCliTokens() {
+  await executeGeminiCliBatchAction("delete", {
+    confirmTitle: "批量删除确认",
+    confirmMessage: `删除后无法恢复，确定要批量删除已选中的 ${selectedGeminiCliTokenIds.size} 个 CLI 凭证吗？`,
+    loadingText: "正在批量删除 CLI 凭证...",
+  });
+}
+
 async function batchExportSelectedGeminiCliTokens() {
   await executeGeminiCliBatchAction("export", {
     requirePassword: true,

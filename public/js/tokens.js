@@ -212,6 +212,14 @@ async function batchReloadSelectedTokens() {
   });
 }
 
+async function batchDeleteSelectedTokens() {
+  await executeTokenBatchAction("delete", {
+    confirmTitle: "批量删除确认",
+    confirmMessage: `删除后无法恢复，确定要批量删除已选中的 ${selectedTokenIds.size} 个 Token 吗？`,
+    loadingText: "正在批量删除 Token...",
+  });
+}
+
 async function batchExportSelectedTokens() {
   await executeTokenBatchAction("export", {
     requirePassword: true,

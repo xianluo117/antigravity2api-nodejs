@@ -450,6 +450,15 @@
                 </button>
                 <button
                   type="button"
+                  onclick="batchDeleteSelectedTokens()"
+                  class="btn btn-danger btn-sm"
+                  data-token-bulk-action
+                  disabled
+                >
+                  🗑️ 批量删除
+                </button>
+                <button
+                  type="button"
                   onclick="batchFetchSelectedProjectIds()"
                   class="btn btn-info btn-sm"
                   data-token-bulk-action
@@ -618,6 +627,15 @@
                   disabled
                 >
                   ⏸️ 批量禁用
+                </button>
+                <button
+                  type="button"
+                  onclick="batchDeleteSelectedGeminiCliTokens()"
+                  class="btn btn-danger btn-sm"
+                  data-geminicli-bulk-action
+                  disabled
+                >
+                  🗑️ 批量删除
                 </button>
                 <button
                   type="button"
