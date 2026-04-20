@@ -154,6 +154,19 @@ export async function refreshToken(token, silent = false) {
     token.access_token = response.data.access_token;
     token.expires_in = response.data.expires_in;
     token.timestamp = Date.now();
+
+    try {
+      const subscription = await this.fetchSubscriptionAndCredits(token);
+      if (subscription?.sub !== undefined) {
+        token.sub = subscription.sub;
+      }
+      if (subscription?.credits !== undefined) {
+        token.credits = subscription.credits;
+      }
+    } catch (subscriptionError) {
+      log.warn(`刷新后同步订阅/积分失败: ${subscriptionError.message}`);
+    }
+
     this.saveToFile(token);
     return token;
   } catch (error) {
@@ -254,7 +267,7 @@ export async function _prepareToken(token) {
         `...${token.access_token.slice(-8)}: 使用随机生成的projectId: ${token.projectId}`,
       );
     } else {
-      const { projectId, sub } = (await this.fetchProjectId(token)) || {};
+      const { projectId, sub, credits } = (await this.fetchProjectId(token)) || {};
       if (projectId === undefined) {
         log.warn(`...${token.access_token.slice(-8)}: 无资格获取projectId，禁用账号`);
         return {
@@ -264,6 +277,7 @@ export async function _prepareToken(token) {
       }
       token.projectId = projectId;
       token.sub = sub;
+      token.credits = credits;
       this.saveToFile(token);
     }
   }
@@ -322,6 +336,9 @@ export async function addToken(tokenData) {
     }
     if (tokenData.sub) {
       newToken.sub = tokenData.sub;
+    }
+    if (tokenData.credits !== undefined) {
+      newToken.credits = tokenData.credits;
     }
 
     allTokens.push(newToken);
@@ -416,6 +433,9 @@ export async function getTokenList() {
       projectId: token.projectId || null,
       email: token.email || null,
       hasQuota: token.hasQuota !== false,
+      sub: token.sub || "free-tier",
+      credits:
+        token.credits ?? ((token.sub || "free-tier") === "free-tier" ? 0 : null),
       disableReason: token.disableReason || null,
       disableTime: token.disableTime || null,
       lastError: token.lastError || null,
@@ -531,8 +551,11 @@ export async function _sendTestMessage(token) {
       if (result?.projectId) {
         token.projectId = result.projectId;
       }
-      if (result?.sub) {
+      if (result?.sub !== undefined) {
         token.sub = result.sub;
+      }
+      if (result?.credits !== undefined) {
+        token.credits = result.credits;
       }
     }
 
@@ -563,8 +586,11 @@ export async function _sendTestMessage(token) {
         if (result?.projectId) {
           token.projectId = result.projectId;
         }
-        if (result?.sub) {
+        if (result?.sub !== undefined) {
           token.sub = result.sub;
+        }
+        if (result?.credits !== undefined) {
+          token.credits = result.credits;
         }
         if (token.projectId) {
           await sendRequest();
@@ -653,10 +679,15 @@ export async function enableTokenById(tokenId, options = {}) {
     }
 
     try {
-      const { projectId, sub } = (await this.fetchProjectId(tokenData)) || {};
+      const { projectId, sub, credits } = (await this.fetchProjectId(tokenData)) || {};
+      if (sub !== undefined) {
+        tokenData.sub = sub;
+      }
+      if (credits !== undefined) {
+        tokenData.credits = credits;
+      }
       if (projectId) {
         tokenData.projectId = projectId;
-        tokenData.sub = sub;
       } else if (!tokenData.projectId && !config.skipProjectIdFetch) {
         log.warn(`[启用检测] token ${tokenId} 无法获取 projectId`);
         const noProjectMessage =
@@ -727,6 +758,7 @@ export async function enableTokenById(tokenId, options = {}) {
     };
     if (tokenData.projectId) updates.projectId = tokenData.projectId;
     if (tokenData.sub) updates.sub = tokenData.sub;
+    if (tokenData.credits !== undefined) updates.credits = tokenData.credits;
 
     allTokens[index] = { ...allTokens[index], ...updates };
     await this.store.writeAll(allTokens);
@@ -772,6 +804,11 @@ export async function refreshTokenById(tokenId) {
   return {
     expires_in: refreshedToken.expires_in,
     timestamp: refreshedToken.timestamp,
+    projectId: refreshedToken.projectId || null,
+    sub: refreshedToken.sub || "free-tier",
+    credits:
+      refreshedToken.credits ??
+      ((refreshedToken.sub || "free-tier") === "free-tier" ? 0 : null),
   };
 }
 

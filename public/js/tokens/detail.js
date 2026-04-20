@@ -165,6 +165,15 @@ function showTokenDetail(tokenId) {
   const safeTokenId = escapeJs(tokenId);
   const safeProjectId = escapeHtml(token.projectId || "");
   const safeEmail = escapeHtml(token.email || "");
+  const subscription = String(token.sub || "free-tier");
+  const subscriptionLabel =
+    typeof formatTokenSubscriptionLabel === "function"
+      ? formatTokenSubscriptionLabel(subscription)
+      : subscription;
+  const creditsText =
+    typeof formatTokenCreditsValue === "function"
+      ? formatTokenCreditsValue(token.credits)
+      : String(token.credits ?? "未知");
   const updatedAtStr = escapeHtml(
     token.timestamp ? new Date(token.timestamp).toLocaleString("zh-CN") : "未知",
   );
@@ -207,6 +216,14 @@ function showTokenDetail(tokenId) {
             <div class="form-group compact">
                 <label>📧 邮箱</label>
                 <input type="email" id="editEmail" value="${safeEmail}" placeholder="账号邮箱">
+            </div>
+            <div class="form-group compact">
+                <label>⭐ 订阅等级</label>
+                <input type="text" value="${escapeHtml(subscriptionLabel)}" readonly style="background: var(--bg); cursor: not-allowed;">
+            </div>
+            <div class="form-group compact">
+                <label>💳 积分余额</label>
+                <input type="text" value="${escapeHtml(creditsText)}" readonly style="background: var(--bg); cursor: not-allowed;">
             </div>
             <div class="form-group compact">
                 <label>🕒 最后更新时间</label>

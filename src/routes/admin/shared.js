@@ -272,6 +272,7 @@ export function buildAntigravityExportData(tokens) {
       email: token.email,
       hasQuota: token.hasQuota,
       sub: token.sub,
+      credits: token.credits,
     })),
   };
 }
@@ -440,6 +441,9 @@ export function smartParseToken(rawToken) {
     findFieldByKeyword(rawToken, "time") ||
     findFieldByKeyword(rawToken, "stamp");
   const hasQuota = findFieldByKeyword(rawToken, "quota");
+  const sub =
+    findFieldByKeyword(rawToken, "sub") || findFieldByKeyword(rawToken, "tier");
+  const credits = findFieldByKeyword(rawToken, "credit");
 
   if (access_token) token.access_token = access_token;
   if (email) token.email = email;
@@ -453,6 +457,15 @@ export function smartParseToken(rawToken) {
   }
   if (hasQuota !== undefined) {
     token.hasQuota = hasQuota === true || hasQuota === "true" || hasQuota === 1;
+  }
+  if (sub) {
+    token.sub = String(sub).trim();
+  }
+  if (credits !== undefined && credits !== null && credits !== "") {
+    const parsedCredits = Number.parseFloat(credits);
+    if (Number.isFinite(parsedCredits)) {
+      token.credits = parsedCredits;
+    }
   }
 
   return token;

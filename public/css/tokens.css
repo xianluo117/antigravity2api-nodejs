@@ -396,6 +396,14 @@
   margin-bottom: 0.25rem;
 }
 
+.token-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.45rem;
+}
+
 .info-row {
   display: flex;
   align-items: center;
@@ -485,12 +493,80 @@
   display: inline-flex;
   align-items: center;
   font-size: 0.65rem;
-  padding: 0.1rem 0.4rem;
-  border-radius: 0.25rem;
-  background: var(--bg-light);
+  padding: 0.14rem 0.5rem;
+  border-radius: 999px;
+  background: var(--bg-light, rgba(15, 23, 42, 0.05));
   color: var(--text);
   border: 1px solid var(--border);
   white-space: nowrap;
+}
+
+.token-tier-badge.is-free {
+  color: var(--text-light);
+  background: rgba(100, 116, 139, 0.12);
+  border-color: rgba(100, 116, 139, 0.2);
+}
+
+.token-tier-badge.is-pro {
+  color: #0f766e;
+  background: rgba(20, 184, 166, 0.12);
+  border-color: rgba(20, 184, 166, 0.2);
+}
+
+.token-tier-badge.is-ultra {
+  color: #7c3aed;
+  background: rgba(124, 58, 237, 0.12);
+  border-color: rgba(124, 58, 237, 0.2);
+}
+
+.token-credit-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.65rem;
+  padding: 0.14rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.1);
+  color: #b45309;
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  white-space: nowrap;
+}
+
+.token-credit-badge.has-credits {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.2);
+}
+
+@media (prefers-color-scheme: dark) {
+  .token-tier-badge.is-free {
+    color: #cbd5e1;
+    background: rgba(148, 163, 184, 0.16);
+    border-color: rgba(148, 163, 184, 0.28);
+  }
+
+  .token-tier-badge.is-pro {
+    color: #5eead4;
+    background: rgba(20, 184, 166, 0.18);
+    border-color: rgba(45, 212, 191, 0.28);
+  }
+
+  .token-tier-badge.is-ultra {
+    color: #c4b5fd;
+    background: rgba(124, 58, 237, 0.2);
+    border-color: rgba(167, 139, 250, 0.28);
+  }
+
+  .token-credit-badge {
+    color: #fcd34d;
+    background: rgba(245, 158, 11, 0.16);
+    border-color: rgba(245, 158, 11, 0.28);
+  }
+
+  .token-credit-badge.has-credits {
+    color: #6ee7b7;
+    background: rgba(16, 185, 129, 0.18);
+    border-color: rgba(52, 211, 153, 0.28);
+  }
 }
 
 .btn-icon {

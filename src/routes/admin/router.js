@@ -784,13 +784,14 @@ router.post("/tokens", cookieAuthMiddleware, async (req, res) => {
     projectId,
     email,
     sub,
+    credits,
   } = req.body;
   if (!access_token || !refresh_token) {
     return res
       .status(400)
       .json({ success: false, message: "access_token和refresh_token必填" });
   }
-  const tokenData = { access_token, refresh_token, expires_in, sub };
+  const tokenData = { access_token, refresh_token, expires_in, sub, credits };
   if (timestamp) tokenData.timestamp = timestamp;
   if (enable !== undefined) tokenData.enable = enable;
   if (projectId) tokenData.projectId = projectId;
@@ -914,6 +915,8 @@ router.post("/tokens/batch", cookieAuthMiddleware, async (req, res) => {
             success: true,
             message: "Project ID获取成功",
             projectId: projectResult.projectId,
+            sub: projectResult.sub,
+            credits: projectResult.credits,
           };
         } else if (action === "refresh_token") {
           const refreshResult = await tokenManager.refreshTokenById(tokenId);
@@ -943,6 +946,8 @@ router.post("/tokens/batch", cookieAuthMiddleware, async (req, res) => {
           success: result.success !== false,
           message: result.message || "操作成功",
           ...(result.projectId ? { projectId: result.projectId } : {}),
+          ...(result.sub !== undefined ? { sub: result.sub } : {}),
+          ...(result.credits !== undefined ? { credits: result.credits } : {}),
           ...(result.data ? { data: result.data } : {}),
           ...(result.modelCount !== undefined ? { modelCount: result.modelCount } : {}),
         });
@@ -992,6 +997,8 @@ router.post(
         success: true,
         message: "Project ID获取成功",
         projectId: result.projectId,
+        sub: result.sub,
+        credits: result.credits,
       });
     } catch (error) {
       logger.error("获取ProjectId失败:", error.message);

@@ -70,7 +70,9 @@ class TokenManager {
           sessionId: generateSessionId(),
           instanceId: generateInstanceId(),
           deviceId: randomUUID(),
-          sub: token?.sub ? token?.sub : "g1-pro-tier",
+          sub: token?.sub || "free-tier",
+          credits:
+            token?.credits ?? ((token?.sub || "free-tier") === "free-tier" ? 0 : null),
         }));
 
       this.currentIndex = 0;

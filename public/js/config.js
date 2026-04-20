@@ -488,6 +488,9 @@ async function loadConfig() {
         if (form.elements["USE_NATIVE_AXIOS"])
           form.elements["USE_NATIVE_AXIOS"].checked =
             json.other.useNativeAxios !== false;
+        if (form.elements["ALWAYS_USE_CREDITS"])
+          form.elements["ALWAYS_USE_CREDITS"].checked =
+            json.other.alwaysUseCredits === true;
         if (form.elements["USE_CONTEXT_SYSTEM_PROMPT"])
           form.elements["USE_CONTEXT_SYSTEM_PROMPT"].checked =
             json.other.useContextSystemPrompt || false;
@@ -694,6 +697,8 @@ async function saveConfig(e) {
     form.elements["SKIP_PROJECT_ID_FETCH"]?.checked || false;
   jsonConfig.other.useNativeAxios =
     form.elements["USE_NATIVE_AXIOS"]?.checked || false;
+  jsonConfig.other.alwaysUseCredits =
+    form.elements["ALWAYS_USE_CREDITS"]?.checked || false;
   jsonConfig.api = { use: form.elements["API_USE"]?.value || "sandbox" };
   jsonConfig.other.proxyProtocol = normalizeProxyProtocol(
     form.elements["PROXY_PROTOCOL"]?.value || "http",
@@ -761,6 +766,7 @@ async function saveConfig(e) {
         key === "API_USE" ||
         key === "SKIP_PROJECT_ID_FETCH" ||
         key === "USE_NATIVE_AXIOS" ||
+        key === "ALWAYS_USE_CREDITS" ||
         key === "USE_CONTEXT_SYSTEM_PROMPT" ||
         key === "MERGE_SYSTEM_PROMPT" ||
         key === "OFFICIAL_PROMPT_POSITION" ||

@@ -1,3 +1,39 @@
+function formatTokenSubscriptionLabel(subscription) {
+  const normalized = String(subscription || "free-tier")
+    .trim()
+    .toLowerCase();
+  if (!normalized || normalized === "free-tier") return "Free";
+  if (normalized.includes("ultra")) return "Ultra";
+  if (
+    normalized.includes("pro") ||
+    normalized.includes("helium") ||
+    normalized.includes("standard")
+  ) {
+    return "Pro";
+  }
+  return subscription || "Free";
+}
+
+function getTokenSubscriptionClass(subscription) {
+  const normalized = String(subscription || "free-tier")
+    .trim()
+    .toLowerCase();
+  if (!normalized || normalized === "free-tier") return "is-free";
+  if (normalized.includes("ultra")) return "is-ultra";
+  return "is-pro";
+}
+
+function formatTokenCreditsValue(credits) {
+  if (credits === undefined || credits === null || credits === "") {
+    return "未知";
+  }
+  const parsed = typeof credits === "number" ? credits : Number.parseFloat(credits);
+  if (!Number.isFinite(parsed)) {
+    return "未知";
+  }
+  return parsed.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+}
+
 function renderTokens(tokens) {
   if (tokens !== cachedTokens) {
     cachedTokens = tokens;
@@ -49,6 +85,12 @@ function renderTokens(tokens) {
       const isRefreshing = refreshingTokens.has(tokenId);
       const isSelected = selectedTokenIds.has(tokenId);
       const cardId = tokenId.substring(0, 8);
+      const subscription = token.sub || "free-tier";
+      const creditsText = formatTokenCreditsValue(token.credits);
+      const creditsTitle =
+        token.credits === undefined || token.credits === null || token.credits === ""
+          ? "积分信息暂未返回"
+          : `积分余额: ${creditsText}`;
 
       const originalIndex = cachedTokens.findIndex((item) => item.id === token.id);
       const tokenNumber = originalIndex + 1;
@@ -82,6 +124,10 @@ function renderTokens(tokens) {
                 </div>
             </div>
             ${!token.enable && disableReason ? `<div class="token-disable-reason" title="${disableTimeStr ? "禁用时间: " + disableTimeStr : ""}">⚠️ ${disableReason}${disableTimeStr ? " (" + disableTimeStr + ")" : ""}</div>${render403ActionUrls(token.disableReason || "")}` : ""}
+            <div class="token-meta-row">
+                <span class="token-tier-badge ${getTokenSubscriptionClass(subscription)}" title="订阅等级: ${escapeHtml(subscription)}">⭐ ${escapeHtml(formatTokenSubscriptionLabel(subscription))}</span>
+                <span class="token-credit-badge ${token.credits > 0 ? "has-credits" : ""}" title="${escapeHtml(creditsTitle)}">💳 ${escapeHtml(creditsText)}</span>
+            </div>
             <div class="token-info">
                 <div class="info-row editable sensitive-row" onclick="editField(event, '${safeTokenId}', 'projectId', '${safeProjectIdJs}')" title="点击编辑">
                     <span class="info-label">📦</span>

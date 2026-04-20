@@ -108,21 +108,20 @@ class OAuthManager {
   async validateAndGetProjectId(accessToken) {
     try {
       log.info("正在验证账号资格...");
-      const { projectId, sub } =
+      const { projectId, sub, credits } =
         (await tokenManager.fetchProjectId({ access_token: accessToken })) ||
         {};
 
       if (projectId === undefined || projectId === null) {
         log.warn("该账号无法获取 projectId，可能无资格或需要稍后重试");
-        return { projectId: null, hasQuota: false, sub };
+        return { projectId: null, hasQuota: false, sub, credits };
       }
 
       log.info("账号验证通过，projectId: " + projectId);
-      return { projectId, hasQuota: true, sub };
+      return { projectId, hasQuota: true, sub, credits };
     } catch (err) {
       log.error("验证账号资格失败: " + err.message);
-      sub = "free-tier";
-      return { projectId: null, hasQuota: false, sub };
+      return { projectId: null, hasQuota: false, sub: "free-tier", credits: 0 };
     }
   }
 
@@ -156,12 +155,13 @@ class OAuthManager {
 
     // 3. 资格校验（仅 antigravity 模式需要 projectId）
     if (mode === "antigravity") {
-      const { projectId, hasQuota, sub } = await this.validateAndGetProjectId(
+      const { projectId, hasQuota, sub, credits } = await this.validateAndGetProjectId(
         account.access_token,
       );
       account.projectId = projectId;
       account.hasQuota = hasQuota;
       account.sub = sub;
+      account.credits = credits;
     }
 
     account.enable = true;
