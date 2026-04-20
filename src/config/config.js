@@ -10,8 +10,10 @@ import {
   DEFAULT_SERVER_HOST,
   DEFAULT_SERVER_PORT,
   DEFAULT_TIMEOUT,
+  LONG_COOLDOWN_THRESHOLD,
   MEMORY_CLEANUP_INTERVAL,
   MODEL_LIST_CACHE_TTL,
+  SHORT_COOLDOWN_THRESHOLD,
 } from "../constants/index.js";
 import { deepMerge } from "../utils/deepMerge.js";
 import { parseEnvFile } from "../utils/envParser.js";
@@ -497,6 +499,22 @@ export function buildConfig(jsonConfig) {
     retryTimes: Number.isFinite(jsonConfig.other?.retryTimes)
       ? jsonConfig.other.retryTimes
       : DEFAULT_RETRY_TIMES,
+    quota: {
+      longCooldownThreshold: Number.isFinite(
+        jsonConfig.quota?.longCooldownThreshold,
+      )
+        ? jsonConfig.quota.longCooldownThreshold
+        : LONG_COOLDOWN_THRESHOLD,
+      shortCooldownThreshold: Number.isFinite(
+        jsonConfig.quota?.shortCooldownThreshold,
+      )
+        ? jsonConfig.quota.shortCooldownThreshold
+        : SHORT_COOLDOWN_THRESHOLD,
+    },
+    alwaysUseCredits:
+      jsonConfig.other?.alwaysUseCredits === true ||
+      process.env.ALWAYS_USE_CREDITS === "1" ||
+      process.env.ALWAYS_USE_CREDITS === "true",
     proxy: getProxyConfig(jsonConfig),
     // 反代系统提示词（从 .env 读取，可在前端修改，空字符串代表不使用）
     systemInstruction: process.env.SYSTEM_INSTRUCTION ?? "",
@@ -656,6 +674,10 @@ export function getConfigJson() {
     return JSON.parse(fs.readFileSync(configJsonPath, "utf8"));
   }
   return {};
+}
+
+export function getUpstreamConfig() {
+  return upstreamConfig || {};
 }
 
 export function saveConfigJson(data) {

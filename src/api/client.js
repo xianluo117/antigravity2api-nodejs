@@ -1,7 +1,7 @@
 import axios from "axios";
 import { randomUUID } from "crypto";
 import tokenManager from "../auth/token_manager.js";
-import config from "../config/config.js";
+import config, { getUpstreamConfig } from "../config/config.js";
 import { MODEL_LIST_CACHE_TTL, QA_PAIRS } from "../constants/index.js";
 import { createLog1, createLog2 } from "../utils/additionalLogs.js";
 import { generateCheckpointBody } from "../utils/checkPoint.js";
@@ -189,15 +189,111 @@ registerMemoryCleanup();
 
 // ==================== 辅助函数 ====================
 
-function buildHeaders(token) {
+function buildHeaders(token, hostOverride = null) {
   return {
-    Host: config.api.host,
+    Host: hostOverride || config.api.host,
     "User-Agent": config.api.userAgent,
     "Transfer-Encoding": "chunked",
     Authorization: `Bearer ${token.access_token}`,
     "Content-Type": "application/json",
     "Accept-Encoding": "gzip",
   };
+}
+
+function getUpstreamApiCandidates() {
+  const upstreamCfg = getUpstreamConfig();
+  const trackedApiConfigs = upstreamCfg?.api || {};
+  const trackedNames = Array.isArray(config.api.upstreamCandidates)
+    ? config.api.upstreamCandidates
+    : [];
+
+  const candidates = [
+    {
+      name: config.api.use || "current",
+      url: config.api.url,
+      noStreamUrl: config.api.noStreamUrl,
+      modelsUrl: config.api.modelsUrl,
+      recordTrajectory: config.api.recordTrajectory,
+      recordCodeAssistMetrics: config.api.recordCodeAssistMetrics,
+      host: config.api.host,
+    },
+  ];
+
+  for (const name of trackedNames) {
+    const tracked = trackedApiConfigs[name];
+    if (!tracked) continue;
+    candidates.push({ name, ...tracked });
+  }
+
+  const seen = new Set();
+  return candidates.filter((candidate) => {
+    const key = JSON.stringify({
+      url: candidate?.url || "",
+      noStreamUrl: candidate?.noStreamUrl || "",
+      modelsUrl: candidate?.modelsUrl || "",
+      recordTrajectory: candidate?.recordTrajectory || "",
+      recordCodeAssistMetrics: candidate?.recordCodeAssistMetrics || "",
+      host: candidate?.host || "",
+    });
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function shouldFallback(error) {
+  if (error?._skipFallback) return false;
+
+  const status = getUpstreamStatus(error);
+  if (status === 429 || status === 403 || status === 400 || status === 407) {
+    return false;
+  }
+  if (status === 503) return true;
+  if (status >= 500) return true;
+
+  const networkCodes = [
+    "ECONNREFUSED",
+    "ECONNRESET",
+    "ETIMEDOUT",
+    "ENOTFOUND",
+    "EAI_AGAIN",
+    "EPIPE",
+    "UND_ERR_CONNECT_TIMEOUT",
+    "ERR_SOCKET_CONNECTION_TIMEOUT",
+  ];
+  const code = error?.code || error?.cause?.code;
+  if (code && networkCodes.includes(code)) return true;
+
+  return typeof error?.message === "string"
+    ? error.message.toLowerCase().includes("timeout")
+    : false;
+}
+
+async function withUpstreamFallback(fn) {
+  const candidates = getUpstreamApiCandidates();
+  if (!candidates.length) {
+    return fn(null);
+  }
+
+  let lastError = null;
+  for (const candidate of candidates) {
+    try {
+      return await fn(candidate);
+    } catch (error) {
+      lastError = error;
+      if (!shouldFallback(error)) {
+        throw error;
+      }
+
+      const status = getUpstreamStatus(error);
+      logger.warn(
+        `[upstream-fallback] ${candidate.name} 失败 (${status || error?.code || "network error"})，尝试下一个上游`,
+      );
+    }
+  }
+
+  logger.error("[upstream-fallback] 所有上游候选均失败");
+  throw lastError;
 }
 
 // 统一错误处理
@@ -248,42 +344,61 @@ export async function generateAssistantResponse(requestBody, token, callback) {
   const conversationId = randomUUID();
   const messageId = randomUUID();
   const modelName = requestBody.model;
-  const headers = buildHeaders(token);
   const dumpId = isDebugDumpEnabled() ? createDumpId("stream") : null;
   const streamCollector = dumpId ? createStreamCollector() : null;
-  headers["Content-Length"] = String(
-    Buffer.byteLength(JSON.stringify(requestBody)),
-  );
   let num = Math.floor(Math.random() * QA_PAIRS.length);
   if (dumpId) {
     await dumpFinalRequest(dumpId, requestBody);
   }
 
-  // 在 state 中临时缓存思维链签名，供流式多片段复用，并携带 session 与 model 信息以写入全局缓存
-  const state = {
-    toolCalls: [],
-    reasoningSignature: null,
-    sessionId: requestBody.request?.sessionId,
-    model: requestBody.model,
-  };
-  const processor = createStreamLineProcessor({
-    state,
-    onEvent: callback,
-    onRawChunk: (chunk) => collectStreamChunk(streamCollector, chunk),
-  });
-
   try {
-    await runSseStream({
-      url: config.api.url,
-      headers,
-      data: requestBody,
-      timeout: config.timeout,
-      proxy: config.proxy || null,
-      processor,
-      onErrorChunk: (chunk) => collectStreamChunk(streamCollector, chunk),
+    let hasEmittedData = false;
+    const safeCallback = (...args) => {
+      hasEmittedData = true;
+      callback(...args);
+    };
+
+    await withUpstreamFallback(async (candidate) => {
+      const targetUrl = candidate?.url || config.api.url;
+      const targetHost = candidate?.host || config.api.host;
+      const headers = buildHeaders(token, targetHost);
+      headers["Content-Length"] = String(
+        Buffer.byteLength(JSON.stringify(requestBody)),
+      );
+
+      const state = {
+        toolCalls: [],
+        reasoningSignature: null,
+        sessionId: requestBody.request?.sessionId,
+        model: requestBody.model,
+      };
+      const processor = createStreamLineProcessor({
+        state,
+        onEvent: safeCallback,
+        onRawChunk: (chunk) => collectStreamChunk(streamCollector, chunk),
+      });
+
+      try {
+        await runSseStream({
+          url: targetUrl,
+          headers,
+          data: requestBody,
+          timeout: config.timeout,
+          proxy: config.proxy || null,
+          processor,
+          onErrorChunk: (chunk) => collectStreamChunk(streamCollector, chunk),
+        });
+      } catch (error) {
+        try {
+          processor.close();
+        } catch {}
+        if (hasEmittedData) {
+          error._skipFallback = true;
+        }
+        throw error;
+      }
     });
 
-    // 流式响应结束后，以 JSON 格式写入日志
     if (dumpId) {
       await dumpStreamResponse(dumpId, streamCollector);
     }
@@ -305,24 +420,26 @@ export async function generateAssistantResponse(requestBody, token, callback) {
       logger.warn("发送checkPoint失败:", err.message),
     );
   } catch (error) {
-    try {
-      processor.close();
-    } catch {}
     await handleApiError(error, token, dumpId);
   }
 }
 
 // 内部工具：从远端拉取完整模型原始数据
-async function fetchRawModels(headers, token) {
+async function fetchRawModels(token) {
   try {
-    const { data } = await requesterManager.fetch(config.api.modelsUrl, {
-      method: "POST",
-      headers,
-      body: {},
-      timeout: config.timeout,
-      proxy: config.proxy || null,
+    return await withUpstreamFallback(async (candidate) => {
+      const targetUrl = candidate?.modelsUrl || config.api.modelsUrl;
+      const targetHost = candidate?.host || config.api.host;
+      const headers = buildHeaders(token, targetHost);
+      const { data } = await requesterManager.fetch(targetUrl, {
+        method: "POST",
+        headers,
+        body: {},
+        timeout: config.timeout,
+        proxy: config.proxy || null,
+      });
+      return data;
     });
-    return data;
   } catch (error) {
     await handleApiError(error, token);
   }
@@ -343,8 +460,7 @@ export async function getAvailableModels() {
     return getDefaultModelList();
   }
 
-  const headers = buildHeaders(token);
-  const data = await fetchRawModels(headers, token);
+  const data = await fetchRawModels(token);
   if (!data) {
     // fetchRawModels 里已经做了统一错误处理，这里兜底为默认列表
     return getDefaultModelList();
@@ -407,8 +523,7 @@ export function clearModelListCache() {
 }
 
 export async function getModelsWithQuotas(token) {
-  const headers = buildHeaders(token);
-  const data = await fetchRawModels(headers, token);
+  const data = await fetchRawModels(token);
   if (!data) return {};
 
   const quotas = {};
@@ -430,25 +545,30 @@ export async function generateAssistantResponseNoStream(requestBody, token) {
   const conversationId = randomUUID();
   const messageId = randomUUID();
   const modelName = requestBody.model;
-  const headers = buildHeaders(token);
   const dumpId = isDebugDumpEnabled() ? createDumpId("no_stream") : null;
   let num = Math.floor(Math.random() * QA_PAIRS.length);
-  headers["Content-Length"] = String(
-    Buffer.byteLength(JSON.stringify(requestBody)),
-  );
 
   if (dumpId) await dumpFinalRequest(dumpId, requestBody);
   let data;
   try {
-    data = await postJsonAndParse({
-      url: config.api.noStreamUrl,
-      headers,
-      body: requestBody,
-      timeout: config.timeout,
-      proxy: config.proxy || null,
-      dumpId,
-      dumpFinalRawResponse,
-      rawFormat: "json",
+    data = await withUpstreamFallback(async (candidate) => {
+      const targetUrl = candidate?.noStreamUrl || config.api.noStreamUrl;
+      const targetHost = candidate?.host || config.api.host;
+      const headers = buildHeaders(token, targetHost);
+      headers["Content-Length"] = String(
+        Buffer.byteLength(JSON.stringify(requestBody)),
+      );
+
+      return postJsonAndParse({
+        url: targetUrl,
+        headers,
+        body: requestBody,
+        timeout: config.timeout,
+        proxy: config.proxy || null,
+        dumpId,
+        dumpFinalRawResponse,
+        rawFormat: "json",
+      });
     });
     sendRecordCodeAssistMetrics(token, trajectoryId).catch((err) =>
       logger.warn("发送RecordCodeAssistMetrics失败:", err.message),
@@ -542,24 +662,29 @@ export async function generateImageForSD(requestBody, token) {
   const conversationId = randomUUID();
   const messageId = randomUUID();
   const modelName = requestBody.model;
-  const headers = buildHeaders(token);
-  headers["Content-Length"] = String(
-    Buffer.byteLength(JSON.stringify(requestBody), "utf-8"),
-  );
   let data;
   let num = Math.floor(Math.random() * QA_PAIRS.length);
 
   //console.log(JSON.stringify(requestBody,null,2));
 
   try {
-    const result = await requesterManager.fetch(config.api.noStreamUrl, {
-      method: "POST",
-      headers,
-      body: requestBody,
-      timeout: config.timeout,
-      proxy: config.proxy || null,
+    data = await withUpstreamFallback(async (candidate) => {
+      const targetUrl = candidate?.noStreamUrl || config.api.noStreamUrl;
+      const targetHost = candidate?.host || config.api.host;
+      const headers = buildHeaders(token, targetHost);
+      headers["Content-Length"] = String(
+        Buffer.byteLength(JSON.stringify(requestBody), "utf-8"),
+      );
+
+      const result = await requesterManager.fetch(targetUrl, {
+        method: "POST",
+        headers,
+        body: requestBody,
+        timeout: config.timeout,
+        proxy: config.proxy || null,
+      });
+      return result.data;
     });
-    data = result.data;
   } catch (error) {
     await handleApiError(error, token);
   }
@@ -602,17 +727,22 @@ export async function sendRecordTrajectoryAnalytics(
     modelName,
     token,
   );
-  const headers = buildHeaders(token);
-  headers["Content-Length"] = String(
-    Buffer.byteLength(JSON.stringify(trajectorybody)),
-  );
   try {
-    await requesterManager.fetch(config.api.recordTrajectory, {
-      method: "POST",
-      headers,
-      body: trajectorybody,
-      timeout: config.timeout,
-      proxy: config.proxy || null,
+    await withUpstreamFallback(async (candidate) => {
+      const targetUrl = candidate?.recordTrajectory || config.api.recordTrajectory;
+      const targetHost = candidate?.host || config.api.host;
+      const headers = buildHeaders(token, targetHost);
+      headers["Content-Length"] = String(
+        Buffer.byteLength(JSON.stringify(trajectorybody)),
+      );
+
+      await requesterManager.fetch(targetUrl, {
+        method: "POST",
+        headers,
+        body: trajectorybody,
+        timeout: config.timeout,
+        proxy: config.proxy || null,
+      });
     });
   } catch (error) {
     throw error;
@@ -663,17 +793,23 @@ export async function sendLog(
 
 export async function sendRecordCodeAssistMetrics(token, trajectoryId) {
   const requestBody = buildRecordCodeAssistMetricsBody(token, trajectoryId);
-  const headers = buildHeaders(token);
-  headers["Content-Length"] = String(
-    Buffer.byteLength(JSON.stringify(requestBody), "utf-8"),
-  );
   try {
-    await requesterManager.fetch(config.api.recordCodeAssistMetrics, {
-      method: "POST",
-      headers,
-      body: requestBody,
-      timeout: config.timeout,
-      proxy: config.proxy || null,
+    await withUpstreamFallback(async (candidate) => {
+      const targetUrl =
+        candidate?.recordCodeAssistMetrics || config.api.recordCodeAssistMetrics;
+      const targetHost = candidate?.host || config.api.host;
+      const headers = buildHeaders(token, targetHost);
+      headers["Content-Length"] = String(
+        Buffer.byteLength(JSON.stringify(requestBody), "utf-8"),
+      );
+
+      await requesterManager.fetch(targetUrl, {
+        method: "POST",
+        headers,
+        body: requestBody,
+        timeout: config.timeout,
+        proxy: config.proxy || null,
+      });
     });
   } catch (error) {
     throw error;
@@ -738,23 +874,28 @@ export async function sendFrontEnd(token) {
 
 export async function sendCheckPoint(token) {
   const requestBody = generateCheckpointBody(token);
-  const headers = buildHeaders(token);
-  headers["Content-Length"] = String(
-    Buffer.byteLength(JSON.stringify(requestBody), "utf-8"),
-  );
   if (checkPointList.has(token.sessionId)) {
     return;
   } else {
     checkPointList.add(token.sessionId);
   }
   try {
-    await requesterManager.fetch(config.api.url, {
-      method: "POST",
-      headers,
-      body: requestBody,
-      timeout: config.timeout,
-      proxy: config.proxy || null,
-      okStatus: [200, 202],
+    await withUpstreamFallback(async (candidate) => {
+      const targetUrl = candidate?.url || config.api.url;
+      const targetHost = candidate?.host || config.api.host;
+      const headers = buildHeaders(token, targetHost);
+      headers["Content-Length"] = String(
+        Buffer.byteLength(JSON.stringify(requestBody), "utf-8"),
+      );
+
+      await requesterManager.fetch(targetUrl, {
+        method: "POST",
+        headers,
+        body: requestBody,
+        timeout: config.timeout,
+        proxy: config.proxy || null,
+        okStatus: [200, 202],
+      });
     });
   } catch (error) {
     throw error;
