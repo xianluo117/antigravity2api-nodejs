@@ -84,8 +84,12 @@ class RequesterManager {
   }
 
   _buildTlsConfig(method, headers, body, timeout, proxy) {
-    const effectiveProxy =
-      proxy || (config.proxy?.allRequests ? config.proxy : null);
+    const selectedProxy = proxy && proxy.enabled !== false ? proxy : null;
+    const fallbackProxy =
+      config.proxy?.allRequests && config.proxy?.enabled !== false
+        ? config.proxy
+        : null;
+    const effectiveProxy = selectedProxy || fallbackProxy;
     const reqConfig = {
       method,
       headers,

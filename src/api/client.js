@@ -127,6 +127,8 @@ let modelListCacheTime = 0;
 const DEFAULT_MODELS = Object.freeze([
   "claude-opus-4-6",
   "claude-opus-4-6-thinking",
+  "claude-opus-4-7",
+  "claude-opus-4-7-thinking",
   "claude-sonnet-4-6",
   "claude-sonnet-4-6-thinking",
   "gemini-3.1-pro-high",
@@ -191,6 +193,7 @@ function buildHeaders(token) {
   return {
     Host: config.api.host,
     "User-Agent": config.api.userAgent,
+    "Transfer-Encoding": "chunked",
     Authorization: `Bearer ${token.access_token}`,
     "Content-Type": "application/json",
     "Accept-Encoding": "gzip",

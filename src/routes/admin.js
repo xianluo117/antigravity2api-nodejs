@@ -2164,7 +2164,8 @@ router.get("/rotation", cookieAuthMiddleware, async (req, res) => {
 // 更新轮询策略配置
 router.put("/rotation", cookieAuthMiddleware, async (req, res) => {
   try {
-    const { strategy, requestCount } = req.body;
+    const { strategy, requestCount, warmup = true } = req.body;
+    const shouldWarmup = warmup !== false;
 
     // 验证策略值
     const validStrategies = ["round_robin", "quota_exhausted", "request_count"];
@@ -2191,13 +2192,15 @@ router.put("/rotation", cookieAuthMiddleware, async (req, res) => {
 
     await Promise.all([tokenManager.reload(), geminicliTokenManager.reload()]);
 
-    const [antigravityReadyIndices, geminicliReadyIndices] = await Promise.all([
-      warmupAntigravityRotationQuotas(),
-      warmupGeminiCliRotationQuotas(),
-    ]);
+    if (shouldWarmup) {
+      const [antigravityReadyIndices, geminicliReadyIndices] = await Promise.all([
+        warmupAntigravityRotationQuotas(),
+        warmupGeminiCliRotationQuotas(),
+      ]);
 
-    tokenManager.randomizeRotationStart(antigravityReadyIndices);
-    geminicliTokenManager.randomizeRotationStart(geminicliReadyIndices);
+      tokenManager.randomizeRotationStart(antigravityReadyIndices);
+      geminicliTokenManager.randomizeRotationStart(geminicliReadyIndices);
+    }
 
     logger.info(
       `轮询策略已更新: ${strategy || "未变"}, 请求次数: ${requestCount || "未变"}`,

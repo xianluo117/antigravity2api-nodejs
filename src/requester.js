@@ -26,6 +26,32 @@ function decompressGzip(buffer) {
   });
 }
 
+// brotli 解压辅助函数
+function decompressBrotli(buffer) {
+  return new Promise((resolve, reject) => {
+    zlib.brotliDecompress(buffer, (err, result) => {
+      if (err) reject(err);
+      else resolve(result);
+    });
+  });
+}
+
+// deflate 解压辅助函数
+function decompressDeflate(buffer) {
+  return new Promise((resolve, reject) => {
+    zlib.inflate(buffer, (err, result) => {
+      if (err) {
+        zlib.inflateRaw(buffer, (rawErr, rawResult) => {
+          if (rawErr) reject(err);
+          else resolve(rawResult);
+        });
+      } else {
+        resolve(result);
+      }
+    });
+  });
+}
+
 class FingerprintRequester {
   constructor(options = {}) {
     this.binDir = options.binDir || this._detectBinDir();
@@ -283,19 +309,31 @@ class FingerprintRequester {
         try {
           let bodyBuffer = Buffer.concat(bodyChunks);
 
-          // 检查是否需要 gzip 解压
-          // 同时验证数据确实是 gzip 格式（魔数 0x1f 0x8b），避免二进制已自动解压但保留 header 的情况
-          const contentEncoding = responseHeaders["content-encoding"] || "";
-          const isGzipData =
-            bodyBuffer.length >= 2 &&
-            bodyBuffer[0] === 0x1f &&
-            bodyBuffer[1] === 0x8b;
-          if (
-            !skipGzipDecompress &&
-            contentEncoding.toLowerCase().includes("gzip") &&
-            isGzipData
-          ) {
-            bodyBuffer = await decompressGzip(bodyBuffer);
+          // 检查是否需要解压（gzip / br / deflate）
+          const contentEncoding = (
+            responseHeaders["content-encoding"] || ""
+          ).toLowerCase();
+          if (!skipGzipDecompress && contentEncoding) {
+            const isGzipData =
+              bodyBuffer.length >= 2 &&
+              bodyBuffer[0] === 0x1f &&
+              bodyBuffer[1] === 0x8b;
+
+            if (contentEncoding.includes("gzip") && isGzipData) {
+              bodyBuffer = await decompressGzip(bodyBuffer);
+            } else if (contentEncoding.includes("br")) {
+              try {
+                bodyBuffer = await decompressBrotli(bodyBuffer);
+              } catch {
+                // 保留原始数据
+              }
+            } else if (contentEncoding.includes("deflate")) {
+              try {
+                bodyBuffer = await decompressDeflate(bodyBuffer);
+              } catch {
+                // 保留原始数据
+              }
+            }
           }
 
           const body = bodyBuffer.toString("utf8");

@@ -152,7 +152,7 @@ export function getEnvPath() {
 
 /**
  * 获取配置文件路径集合
- * @returns {{envPath: string, configJsonPath: string, configJsonExamplePath: string, examplePath: string}} 配置文件路径
+ * @returns {{envPath: string, configJsonPath: string, configJsonExamplePath: string, upstreamJsonPath: string, examplePath: string}} 配置文件路径
  */
 export function getConfigPaths() {
   if (isPkg) {
@@ -186,6 +186,15 @@ export function getConfigPaths() {
         configJsonExamplePath = cwdExamplePath;
       }
     }
+
+    // 查找 upstream.json 文件
+    let upstreamJsonPath = path.join(exeDir, 'src', 'config', 'upstream.json');
+    if (!fs.existsSync(upstreamJsonPath)) {
+      const cwdUpstreamPath = path.join(cwdDir, 'src', 'config', 'upstream.json');
+      if (fs.existsSync(cwdUpstreamPath)) {
+        upstreamJsonPath = cwdUpstreamPath;
+      }
+    }
     
     // 查找 .env.example 文件
     let examplePath = path.join(exeDir, '.env.example');
@@ -196,7 +205,7 @@ export function getConfigPaths() {
       }
     }
     
-    return { envPath, configJsonPath, configJsonExamplePath, examplePath };
+    return { envPath, configJsonPath, configJsonExamplePath, upstreamJsonPath, examplePath };
   }
   
   // 开发环境
@@ -204,6 +213,7 @@ export function getConfigPaths() {
     envPath: path.join(__dirname, '../../.env'),
     configJsonPath: path.join(__dirname, '../../config.json'),
     configJsonExamplePath: path.join(__dirname, '../../config.json.example'),
+    upstreamJsonPath: path.join(__dirname, '../config/upstream.json'),
     examplePath: path.join(__dirname, '../../.env.example')
   };
 }
