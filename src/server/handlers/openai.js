@@ -74,6 +74,11 @@ export const handleOpenAIRequest = async (req, res) => {
       quotaManager.updateQuota(tokenId, quotas);
     };
 
+    const applyCreditTypes = (body, shouldUseCredits) =>
+      shouldUseCredits || config.alwaysUseCredits
+        ? { ...body, enabledCreditTypes: ["GOOGLE_ONE_AI"] }
+        : body;
+
     // 创建 with429Retry 选项
     const createRetryOptions = (prefix) => ({
       loggerPrefix: prefix,
@@ -81,6 +86,7 @@ export const handleOpenAIRequest = async (req, res) => {
       tokenId,
       modelId: actualModel,
       refreshQuota,
+      markQuotaExhausted: async () => tokenManager.markQuotaExhausted(token),
     });
 
     const isImageModel = actualModel.includes("-image");
@@ -108,7 +114,11 @@ export const handleOpenAIRequest = async (req, res) => {
       try {
         if (isImageModel) {
           const { content, usage, reasoningSignature } = await with429Retry(
-            () => generateAssistantResponseNoStream(requestBody, token),
+            (attempt, shouldUseCredits) =>
+              generateAssistantResponseNoStream(
+                applyCreditTypes(requestBody, shouldUseCredits),
+                token,
+              ),
             safeRetries,
             createRetryOptions("chat.stream.image "),
           );
@@ -129,45 +139,49 @@ export const handleOpenAIRequest = async (req, res) => {
           let usageData = null;
 
           await with429Retry(
-            () =>
-              generateAssistantResponse(requestBody, token, (data) => {
-                if (data.type === "usage") {
-                  usageData = data.usage;
-                } else if (data.type === "reasoning") {
-                  const delta = { reasoning_content: data.reasoning_content };
-                  if (data.thoughtSignature && config.passSignatureToClient) {
-                    delta.thoughtSignature = data.thoughtSignature;
+            (attempt, shouldUseCredits) =>
+              generateAssistantResponse(
+                applyCreditTypes(requestBody, shouldUseCredits),
+                token,
+                (data) => {
+                  if (data.type === "usage") {
+                    usageData = data.usage;
+                  } else if (data.type === "reasoning") {
+                    const delta = { reasoning_content: data.reasoning_content };
+                    if (data.thoughtSignature && config.passSignatureToClient) {
+                      delta.thoughtSignature = data.thoughtSignature;
+                    }
+                    writeStreamData(
+                      res,
+                      createStreamChunk(id, created, responseModel, delta),
+                    );
+                  } else if (data.type === "tool_calls") {
+                    hasToolCall = true;
+                    // 根据配置决定是否透传工具调用中的签名
+                    const toolCallsWithIndex = data.tool_calls.map(
+                      (toolCall, index) => {
+                        if (config.passSignatureToClient) {
+                          return { index, ...toolCall };
+                        } else {
+                          const { thoughtSignature, ...rest } = toolCall;
+                          return { index, ...rest };
+                        }
+                      },
+                    );
+                    const delta = { tool_calls: toolCallsWithIndex };
+                    writeStreamData(
+                      res,
+                      createStreamChunk(id, created, responseModel, delta),
+                    );
+                  } else {
+                    const delta = { content: data.content };
+                    writeStreamData(
+                      res,
+                      createStreamChunk(id, created, responseModel, delta),
+                    );
                   }
-                  writeStreamData(
-                    res,
-                    createStreamChunk(id, created, responseModel, delta),
-                  );
-                } else if (data.type === "tool_calls") {
-                  hasToolCall = true;
-                  // 根据配置决定是否透传工具调用中的签名
-                  const toolCallsWithIndex = data.tool_calls.map(
-                    (toolCall, index) => {
-                      if (config.passSignatureToClient) {
-                        return { index, ...toolCall };
-                      } else {
-                        const { thoughtSignature, ...rest } = toolCall;
-                        return { index, ...rest };
-                      }
-                    },
-                  );
-                  const delta = { tool_calls: toolCallsWithIndex };
-                  writeStreamData(
-                    res,
-                    createStreamChunk(id, created, responseModel, delta),
-                  );
-                } else {
-                  const delta = { content: data.content };
-                  writeStreamData(
-                    res,
-                    createStreamChunk(id, created, responseModel, delta),
-                  );
-                }
-              }),
+                },
+              ),
             safeRetries,
             createRetryOptions("chat.stream "),
           );
@@ -209,21 +223,25 @@ export const handleOpenAIRequest = async (req, res) => {
 
       try {
         await with429Retry(
-          () =>
-            generateAssistantResponse(requestBody, token, (data) => {
-              if (data.type === "usage") {
-                usageData = data.usage;
-              } else if (data.type === "reasoning") {
-                reasoningContent += data.reasoning_content || "";
-                if (data.thoughtSignature) {
-                  reasoningSignature = data.thoughtSignature;
+          (attempt, shouldUseCredits) =>
+            generateAssistantResponse(
+              applyCreditTypes(requestBody, shouldUseCredits),
+              token,
+              (data) => {
+                if (data.type === "usage") {
+                  usageData = data.usage;
+                } else if (data.type === "reasoning") {
+                  reasoningContent += data.reasoning_content || "";
+                  if (data.thoughtSignature) {
+                    reasoningSignature = data.thoughtSignature;
+                  }
+                } else if (data.type === "tool_calls") {
+                  toolCalls.push(...data.tool_calls);
+                } else if (data.type === "text") {
+                  content += data.content || "";
                 }
-              } else if (data.type === "tool_calls") {
-                toolCalls.push(...data.tool_calls);
-              } else if (data.type === "text") {
-                content += data.content || "";
-              }
-            }),
+              },
+            ),
           safeRetries,
           createRetryOptions("chat.fake_no_stream "),
         );
@@ -279,7 +297,11 @@ export const handleOpenAIRequest = async (req, res) => {
         toolCalls,
         usage,
       } = await with429Retry(
-        () => generateAssistantResponseNoStream(requestBody, token),
+        (attempt, shouldUseCredits) =>
+          generateAssistantResponseNoStream(
+            applyCreditTypes(requestBody, shouldUseCredits),
+            token,
+          ),
         safeRetries,
         createRetryOptions("chat.no_stream "),
       );

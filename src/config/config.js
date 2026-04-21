@@ -10,8 +10,10 @@ import {
   DEFAULT_SERVER_HOST,
   DEFAULT_SERVER_PORT,
   DEFAULT_TIMEOUT,
+  LONG_COOLDOWN_THRESHOLD,
   MEMORY_CLEANUP_INTERVAL,
   MODEL_LIST_CACHE_TTL,
+  SHORT_COOLDOWN_THRESHOLD,
 } from "../constants/index.js";
 import { deepMerge } from "../utils/deepMerge.js";
 import { parseEnvFile } from "../utils/envParser.js";
@@ -115,7 +117,8 @@ function displayGeneratedCredentials() {
   }
 }
 
-const { envPath, configJsonPath, configJsonExamplePath } = getConfigPaths();
+const { envPath, configJsonPath, configJsonExamplePath, upstreamJsonPath } =
+  getConfigPaths();
 
 // 默认反代系统提示词
 const DEFAULT_SYSTEM_INSTRUCTION =
@@ -161,6 +164,16 @@ if (!fs.existsSync(configJsonPath) && fs.existsSync(configJsonExamplePath)) {
 let jsonConfig = {};
 if (fs.existsSync(configJsonPath)) {
   jsonConfig = JSON.parse(fs.readFileSync(configJsonPath, "utf8"));
+}
+
+// 加载 upstream.json（上游协议配置，跟随代码更新）
+let upstreamConfig = {};
+if (fs.existsSync(upstreamJsonPath)) {
+  try {
+    upstreamConfig = JSON.parse(fs.readFileSync(upstreamJsonPath, "utf8"));
+  } catch (error) {
+    log.warn(`加载 upstream.json 失败，继续使用内置默认配置: ${error.message}`);
+  }
 }
 
 // 加载 .env（指定路径）
@@ -251,6 +264,19 @@ export function getProxyConfig(jsonConfig = {}) {
     jsonConfig.other?.disabledProxyPool || "",
   );
   const allRequests = jsonConfig.other?.proxyAllRequests === true;
+  const proxyEnabled = jsonConfig.other?.proxyEnabled !== false;
+
+  if (!proxyEnabled) {
+    return {
+      enabled: false,
+      mode: "disabled",
+      allRequests,
+      protocol: proxyProtocol,
+      poolRaw: proxyPool,
+      disabledPoolRaw: disabledProxyPool,
+      url: null,
+    };
+  }
 
   if (proxyPool) {
     return {
@@ -298,7 +324,7 @@ export function getProxyConfig(jsonConfig = {}) {
           ? "https"
           : "http",
       poolRaw: "",
-      disabledPoolRaw: disabledProxyPool,
+      disabledPoolRaw: disabledPoolRaw,
       url: systemProxy,
     };
   }
@@ -348,6 +374,8 @@ const DEFAULT_API_UNLEASH = {
   frontend: "https://antigravity-unleash.goog/api/frontend",
 };
 
+const DEFAULT_UPSTREAM_CANDIDATES = ["production", "sandbox", "daily"];
+
 // Gemini CLI API 配置（来自 gcli2api 项目）
 // 使用 v1internal 端点，模型名称在请求体中指定
 const DEFAULT_GEMINICLI_API_CONFIG = {
@@ -359,15 +387,23 @@ const DEFAULT_GEMINICLI_API_CONFIG = {
 
 /**
  * 获取当前使用的 API 配置（Antigravity）
+ * 优先级：config.json 自定义 > upstream.json > 代码内置默认值
  * @param {Object} jsonConfig - JSON 配置对象
+ * @param {Object} upstreamCfg - upstream 配置对象
  * @returns {Object} 当前 API 配置
  */
-function getActiveApiConfig(jsonConfig) {
+function getActiveApiConfig(jsonConfig, upstreamCfg = {}) {
   const apiUse = jsonConfig.api?.use || "production";
+  const trackedApiConfigs = upstreamCfg.api || {};
   const customConfig = jsonConfig.api?.[apiUse];
+  const trackedConfig = trackedApiConfigs[apiUse];
   const defaultConfig =
-    DEFAULT_API_CONFIGS[apiUse] || DEFAULT_API_CONFIGS.production;
-  const unleash = jsonConfig.api?.unleash || DEFAULT_API_UNLEASH;
+    trackedConfig || DEFAULT_API_CONFIGS[apiUse] || DEFAULT_API_CONFIGS.production;
+  const unleash =
+    jsonConfig.api?.unleash || trackedApiConfigs.unleash || DEFAULT_API_UNLEASH;
+  const upstreamCandidates = Array.isArray(upstreamCfg.upstreamCandidates)
+    ? upstreamCfg.upstreamCandidates
+    : DEFAULT_UPSTREAM_CANDIDATES;
 
   return {
     use: apiUse,
@@ -382,7 +418,8 @@ function getActiveApiConfig(jsonConfig) {
     host: customConfig?.host || defaultConfig.host,
     userAgent: `antigravity/${jsonConfig.api?.version || "1.19.5"} windows/amd64`,
     ideVersion: jsonConfig.api?.version || "1.19.5",
-    unleash: unleash,
+    unleash,
+    upstreamCandidates,
   };
 }
 
@@ -410,7 +447,7 @@ function getGeminiCliApiConfig(jsonConfig) {
  * @returns {Object} 完整配置对象
  */
 export function buildConfig(jsonConfig) {
-  const apiConfig = getActiveApiConfig(jsonConfig);
+  const apiConfig = getActiveApiConfig(jsonConfig, upstreamConfig);
 
   return {
     server: {
@@ -462,6 +499,22 @@ export function buildConfig(jsonConfig) {
     retryTimes: Number.isFinite(jsonConfig.other?.retryTimes)
       ? jsonConfig.other.retryTimes
       : DEFAULT_RETRY_TIMES,
+    quota: {
+      longCooldownThreshold: Number.isFinite(
+        jsonConfig.quota?.longCooldownThreshold,
+      )
+        ? jsonConfig.quota.longCooldownThreshold
+        : LONG_COOLDOWN_THRESHOLD,
+      shortCooldownThreshold: Number.isFinite(
+        jsonConfig.quota?.shortCooldownThreshold,
+      )
+        ? jsonConfig.quota.shortCooldownThreshold
+        : SHORT_COOLDOWN_THRESHOLD,
+    },
+    alwaysUseCredits:
+      jsonConfig.other?.alwaysUseCredits === true ||
+      process.env.ALWAYS_USE_CREDITS === "1" ||
+      process.env.ALWAYS_USE_CREDITS === "true",
     proxy: getProxyConfig(jsonConfig),
     // 反代系统提示词（从 .env 读取，可在前端修改，空字符串代表不使用）
     systemInstruction: process.env.SYSTEM_INSTRUCTION ?? "",
@@ -621,6 +674,10 @@ export function getConfigJson() {
     return JSON.parse(fs.readFileSync(configJsonPath, "utf8"));
   }
   return {};
+}
+
+export function getUpstreamConfig() {
+  return upstreamConfig || {};
 }
 
 export function saveConfigJson(data) {

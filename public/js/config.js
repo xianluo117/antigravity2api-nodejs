@@ -476,6 +476,9 @@ async function loadConfig() {
         if (form.elements["DISABLED_PROXY_POOL"])
           form.elements["DISABLED_PROXY_POOL"].value =
             json.other.disabledProxyPool ?? "";
+        if (form.elements["PROXY_ENABLED"])
+          form.elements["PROXY_ENABLED"].checked =
+            json.other.proxyEnabled !== false;
         if (form.elements["PROXY_ALL_REQUESTS"])
           form.elements["PROXY_ALL_REQUESTS"].checked =
             json.other.proxyAllRequests === true;
@@ -485,6 +488,9 @@ async function loadConfig() {
         if (form.elements["USE_NATIVE_AXIOS"])
           form.elements["USE_NATIVE_AXIOS"].checked =
             json.other.useNativeAxios !== false;
+        if (form.elements["ALWAYS_USE_CREDITS"])
+          form.elements["ALWAYS_USE_CREDITS"].checked =
+            json.other.alwaysUseCredits === true;
         if (form.elements["USE_CONTEXT_SYSTEM_PROMPT"])
           form.elements["USE_CONTEXT_SYSTEM_PROMPT"].checked =
             json.other.useContextSystemPrompt || false;
@@ -672,19 +678,27 @@ async function saveConfig(e) {
     "IMAGE_BASE_URL",
   ];
   const envConfig = {};
+  const shouldPersistRotationSettings =
+    activeSettingSectionId === "section-rotation";
   const jsonConfig = {
     server: {},
     api: {},
     defaults: {},
     other: {},
-    rotation: {},
   };
+  if (shouldPersistRotationSettings) {
+    jsonConfig.rotation = {};
+  }
 
   // 处理checkbox：未选中的checkbox不会出现在FormData中
+  jsonConfig.other.proxyEnabled =
+    form.elements["PROXY_ENABLED"]?.checked !== false;
   jsonConfig.other.skipProjectIdFetch =
     form.elements["SKIP_PROJECT_ID_FETCH"]?.checked || false;
   jsonConfig.other.useNativeAxios =
     form.elements["USE_NATIVE_AXIOS"]?.checked || false;
+  jsonConfig.other.alwaysUseCredits =
+    form.elements["ALWAYS_USE_CREDITS"]?.checked || false;
   jsonConfig.api = { use: form.elements["API_USE"]?.value || "sandbox" };
   jsonConfig.other.proxyProtocol = normalizeProxyProtocol(
     form.elements["PROXY_PROTOCOL"]?.value || "http",
@@ -749,8 +763,10 @@ async function saveConfig(e) {
         const num = parseInt(value);
         jsonConfig.other.retryTimes = Number.isNaN(num) ? undefined : num;
       } else if (
+        key === "API_USE" ||
         key === "SKIP_PROJECT_ID_FETCH" ||
         key === "USE_NATIVE_AXIOS" ||
+        key === "ALWAYS_USE_CREDITS" ||
         key === "USE_CONTEXT_SYSTEM_PROMPT" ||
         key === "MERGE_SYSTEM_PROMPT" ||
         key === "OFFICIAL_PROMPT_POSITION" ||
@@ -761,16 +777,23 @@ async function saveConfig(e) {
         key === "CACHE_IMAGE_SIGNATURES" ||
         key === "CACHE_THINKING" ||
         key === "FAKE_NON_STREAM" ||
+        key === "PROXY_ENABLED" ||
+        key === "PROXY_ALL_REQUESTS" ||
         key === "PROXY_PROTOCOL" ||
         key === "PROXY_POOL" ||
-        key === "DISABLED_PROXY_POOL"
+        key === "DISABLED_PROXY_POOL" ||
+        key === "PROXY_TEST_CONCURRENCY"
       ) {
         // 跳过，已在上面处理
-      } else if (key === "ROTATION_STRATEGY")
-        jsonConfig.rotation.strategy = value || undefined;
-      else if (key === "ROTATION_REQUEST_COUNT")
-        jsonConfig.rotation.requestCount = parseInt(value) || undefined;
-      else envConfig[key] = value;
+      } else if (key === "ROTATION_STRATEGY") {
+        if (shouldPersistRotationSettings) {
+          jsonConfig.rotation.strategy = value || undefined;
+        }
+      } else if (key === "ROTATION_REQUEST_COUNT") {
+        if (shouldPersistRotationSettings) {
+          jsonConfig.rotation.requestCount = parseInt(value) || undefined;
+        }
+      } else envConfig[key] = value;
     }
   });
 
@@ -818,13 +841,20 @@ async function saveConfig(e) {
 
     const data = await response.json();
 
-    if (jsonConfig.rotation && Object.keys(jsonConfig.rotation).length > 0) {
+    if (
+      shouldPersistRotationSettings &&
+      jsonConfig.rotation &&
+      Object.keys(jsonConfig.rotation).length > 0
+    ) {
       await authFetch("/admin/rotation", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(jsonConfig.rotation),
+        body: JSON.stringify({
+          ...jsonConfig.rotation,
+          warmup: true,
+        }),
       });
     }
 

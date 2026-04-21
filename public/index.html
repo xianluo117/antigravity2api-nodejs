@@ -917,6 +917,20 @@
                             <span class="slider"></span>
                           </label>
                         </div>
+                        <div class="form-group compact switch-group">
+                          <label
+                            >强制积分模式
+                            <span
+                              class="help-tip"
+                              data-tooltip="开启后所有支持的请求都会直接携带 `GOOGLE_ONE_AI` 积分类型，而不是等到 429 后再切换。"
+                              >?</span
+                            ></label
+                          >
+                          <label class="switch">
+                            <input type="checkbox" name="ALWAYS_USE_CREDITS" />
+                            <span class="slider"></span>
+                          </label>
+                        </div>
                       </div>
                       <div class="form-group compact">
                         <label>图片访问链接</label>
@@ -927,6 +941,20 @@
                         />
                       </div>
                       <div class="form-row-inline">
+                        <div class="form-group compact switch-group">
+                          <label
+                            >总代理开关
+                            <span
+                              class="help-tip"
+                              data-tooltip="关闭后保留代理池与禁用池配置，但所有请求都不使用代理。"
+                              >?</span
+                            ></label
+                          >
+                          <label class="switch">
+                            <input type="checkbox" name="PROXY_ENABLED" checked />
+                            <span class="slider"></span>
+                          </label>
+                        </div>
                         <div class="form-group compact switch-group">
                           <label
                             >全代理模式
@@ -1576,6 +1604,13 @@
           "js/ui.js",
           "js/auth.js",
           "js/quota.js",
+          "js/tokens/state.js",
+          "js/tokens/dialogs.js",
+          "js/tokens/batch.js",
+          "js/tokens/actions.js",
+          "js/tokens/import.js",
+          "js/tokens/render.js",
+          "js/tokens/detail.js",
           "js/tokens.js",
           "js/geminicli.js",
           "js/config.js",

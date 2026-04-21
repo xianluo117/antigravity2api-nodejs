@@ -103,6 +103,13 @@ export const TOKEN_REFRESH_BUFFER = 300000;
  */
 export const LONG_COOLDOWN_THRESHOLD = 60 * 60 * 1000;
 
+/**
+ * 短时间冷却阈值（毫秒）- 5秒
+ * 当 429 恢复时间超过此值但未达到长冷却阈值时，冻结当前 token+模型组
+ * @type {number}
+ */
+export const SHORT_COOLDOWN_THRESHOLD = 5 * 1000;
+
 // ==================== 生成参数默认值 ====================
 
 /**
