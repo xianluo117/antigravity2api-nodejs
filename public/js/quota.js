@@ -294,6 +294,51 @@ function getTokenListByMode(mode = "antigravity") {
   return typeof cachedTokens !== "undefined" ? cachedTokens : [];
 }
 
+function syncQuotaTokenState(payload, mode = "antigravity") {
+  if (mode !== "antigravity") return false;
+  if (typeof cachedTokens === "undefined" || !Array.isArray(cachedTokens)) {
+    return false;
+  }
+
+  const tokenState = payload?.tokenState;
+  if (!tokenState?.id) return false;
+
+  const index = cachedTokens.findIndex((token) => token.id === tokenState.id);
+  if (index === -1) return false;
+
+  const currentToken = cachedTokens[index] || {};
+  const nextToken = {
+    ...currentToken,
+    ...(tokenState.sub !== undefined ? { sub: tokenState.sub } : {}),
+    ...(tokenState.credits !== undefined
+      ? { credits: tokenState.credits }
+      : {}),
+    ...(tokenState.projectId !== undefined
+      ? { projectId: tokenState.projectId }
+      : {}),
+    ...(tokenState.enable !== undefined ? { enable: tokenState.enable } : {}),
+  };
+
+  const changed =
+    currentToken.sub !== nextToken.sub ||
+    currentToken.credits !== nextToken.credits ||
+    currentToken.projectId !== nextToken.projectId ||
+    currentToken.enable !== nextToken.enable;
+
+  if (!changed) return false;
+
+  cachedTokens = [...cachedTokens];
+  cachedTokens[index] = nextToken;
+  return true;
+}
+
+function refreshQuotaRelatedTokenList(mode = "antigravity") {
+  if (mode !== "antigravity") return;
+  if (typeof renderTokens === "function" && typeof cachedTokens !== "undefined") {
+    renderTokens(cachedTokens);
+  }
+}
+
 // 使用 tokenId 加载额度摘要
 async function loadTokenQuotaSummary(
   tokenId,
@@ -507,6 +552,9 @@ async function refreshInlineQuota(cardId, tokenId, mode = "antigravity") {
     const data = await response.json();
     if (data.success && data.data) {
       quotaCache.set(cacheKey, data.data);
+      if (syncQuotaTokenState(data.data, mode)) {
+        refreshQuotaRelatedTokenList(mode);
+      }
     }
   } catch (e) {}
 
@@ -669,6 +717,10 @@ async function loadQuotaData(
 
     if (data.success) {
       quotaCache.set(getQuotaCacheKey(tokenId, mode), data.data);
+      const tokenStateChanged = syncQuotaTokenState(data.data, mode);
+      if (tokenStateChanged) {
+        refreshQuotaRelatedTokenList(mode);
+      }
       renderQuotaModal(quotaContent, data.data, mode);
     } else {
       quotaContent.innerHTML = `<div class="quota-error">加载失败: ${escapeHtml(data.message)}</div>`;
@@ -716,6 +768,8 @@ async function refreshAllQuotas(mode = "antigravity") {
   enabledTokens.forEach((t) => quotaCache.clear(getQuotaCacheKey(t.id, mode)));
 
   try {
+    let tokenStateChanged = false;
+
     // 并行刷新已启用 Token 的额度
     const refreshPromises = enabledTokens.map(async (token) => {
       try {
@@ -725,6 +779,8 @@ async function refreshAllQuotas(mode = "antigravity") {
         const data = await response.json();
         if (data.success && data.data) {
           quotaCache.set(getQuotaCacheKey(token.id, mode), data.data);
+          tokenStateChanged =
+            syncQuotaTokenState(data.data, mode) || tokenStateChanged;
         }
       } catch (e) {
         // 单个 Token 刷新失败不影响其他
@@ -736,6 +792,10 @@ async function refreshAllQuotas(mode = "antigravity") {
     });
 
     await Promise.all(refreshPromises);
+
+    if (tokenStateChanged) {
+      refreshQuotaRelatedTokenList(mode);
+    }
 
     // 重新渲染启用 token 的额度摘要
     enabledTokens.forEach((token) => {

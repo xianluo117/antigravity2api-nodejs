@@ -25,6 +25,7 @@ import {
   randomizeRotationStart,
   updateRotationConfig,
 } from "./geminicli_token_manager/rotation.js";
+import quotaManager from "./quota_manager.js";
 import TokenStore from "./token_store.js";
 
 /**

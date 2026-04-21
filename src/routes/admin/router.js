@@ -2152,6 +2152,26 @@ router.get("/tokens/:tokenId/quotas", cookieAuthMiddleware, async (req, res) => 
 
       if (forceRefresh) {
         quotaData = null;
+        try {
+          const subscription = await tokenManager.fetchSubscriptionAndCredits(tokenData);
+          if (subscription?.sub !== undefined) {
+            tokenData.sub = subscription.sub;
+          }
+          if (subscription?.credits !== undefined) {
+            tokenData.credits = subscription.credits;
+          }
+          tokenManager.saveToFile(tokenData);
+
+          const memoryToken = tokenManager.tokens.find(
+            (item) => item.refresh_token === tokenData.refresh_token,
+          );
+          if (memoryToken) {
+            memoryToken.sub = tokenData.sub;
+            memoryToken.credits = tokenData.credits;
+          }
+        } catch (error) {
+          logger.warn(`刷新额度时同步积分失败: ${error.message}`);
+        }
       }
 
       if (!quotaData) {
@@ -2175,6 +2195,9 @@ router.get("/tokens/:tokenId/quotas", cookieAuthMiddleware, async (req, res) => 
     });
 
     const requestCounts = quotaData.requestCounts || {};
+    const normalizedSub = tokenData?.sub || "free-tier";
+    const normalizedCredits =
+      tokenData?.credits ?? (normalizedSub === "free-tier" ? 0 : null);
 
     res.json({
       success: true,
@@ -2182,6 +2205,13 @@ router.get("/tokens/:tokenId/quotas", cookieAuthMiddleware, async (req, res) => 
         lastUpdated: quotaData.lastUpdated,
         models: modelsWithBeijingTime,
         requestCounts,
+        tokenState: {
+          id: tokenId,
+          sub: normalizedSub,
+          credits: normalizedCredits,
+          projectId: tokenData?.projectId || null,
+          enable: tokenData?.enable !== false,
+        },
       },
     });
   } catch (error) {
