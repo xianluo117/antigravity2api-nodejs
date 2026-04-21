@@ -13,7 +13,6 @@ import {
   RotationStrategy,
   getRotationProgress,
   getToken,
-  getRotationConfig,
   loadRotationConfig,
   randomizeRotationStart,
   updateRotationConfig,
@@ -72,7 +71,8 @@ class TokenManager {
           deviceId: randomUUID(),
           sub: token?.sub || "free-tier",
           credits:
-            token?.credits ?? ((token?.sub || "free-tier") === "free-tier" ? 0 : null),
+            token?.credits ??
+            ((token?.sub || "free-tier") === "free-tier" ? 0 : null),
         }));
 
       this.currentIndex = 0;
@@ -123,7 +123,6 @@ Object.assign(TokenManager.prototype, projectMethods, manageMethods, {
   getToken,
   _getTokenForQuotaExhaustedStrategy,
   _getTokenForDefaultStrategy,
-  getRotationConfig,
 });
 
 export { RotationStrategy };
