@@ -342,18 +342,6 @@ export function getProxyConfig(jsonConfig = {}) {
 
 // 默认 API 配置（Antigravity）
 const DEFAULT_API_CONFIGS = {
-  sandbox: {
-    url: "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:streamGenerateContent?alt=sse",
-    modelsUrl:
-      "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:fetchAvailableModels",
-    noStreamUrl:
-      "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent",
-    recordTrajectory:
-      "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:recordTrajectoryAnalytics",
-    recordCodeAssistMetrics:
-      "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:recordCodeAssistMetrics",
-    host: "daily-cloudcode-pa.sandbox.googleapis.com",
-  },
   production: {
     url: "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
     modelsUrl:
@@ -366,6 +354,42 @@ const DEFAULT_API_CONFIGS = {
       "https://daily-cloudcode-pa.googleapis.com/v1internal:recordCodeAssistMetrics",
     host: "daily-cloudcode-pa.googleapis.com",
   },
+  daily: {
+    url: "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
+    modelsUrl:
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+    noStreamUrl:
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent",
+    recordTrajectory:
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:recordTrajectoryAnalytics",
+    recordCodeAssistMetrics:
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:recordCodeAssistMetrics",
+    host: "daily-cloudcode-pa.googleapis.com",
+  },
+  sandbox: {
+    url: "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:streamGenerateContent?alt=sse",
+    modelsUrl:
+      "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:fetchAvailableModels",
+    noStreamUrl:
+      "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent",
+    recordTrajectory:
+      "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:recordTrajectoryAnalytics",
+    recordCodeAssistMetrics:
+      "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:recordCodeAssistMetrics",
+    host: "daily-cloudcode-pa.sandbox.googleapis.com",
+  },
+  sukaka: {
+    url: "https://gcli-api.sukaka.top/cloudcode-pa/v1internal:streamGenerateContent?alt=sse",
+    modelsUrl:
+      "https://gcli-api.sukaka.top/cloudcode-pa/v1internal:fetchAvailableModels",
+    noStreamUrl:
+      "https://gcli-api.sukaka.top/cloudcode-pa/v1internal:generateContent",
+    recordTrajectory:
+      "https://gcli-api.sukaka.top/cloudcode-pa/v1internal:recordTrajectoryAnalytics",
+    recordCodeAssistMetrics:
+      "https://gcli-api.sukaka.top/cloudcode-pa/v1internal:recordCodeAssistMetrics",
+    host: "gcli-api.sukaka.top",
+  },
 };
 
 const DEFAULT_API_UNLEASH = {
@@ -374,7 +398,12 @@ const DEFAULT_API_UNLEASH = {
   frontend: "https://antigravity-unleash.goog/api/frontend",
 };
 
-const DEFAULT_UPSTREAM_CANDIDATES = ["production", "sandbox", "daily"];
+const DEFAULT_UPSTREAM_CANDIDATES = [
+  "production",
+  "daily",
+  "sandbox",
+  "sukaka",
+];
 
 // Gemini CLI API 配置（来自 gcli2api 项目）
 // 使用 v1internal 端点，模型名称在请求体中指定
