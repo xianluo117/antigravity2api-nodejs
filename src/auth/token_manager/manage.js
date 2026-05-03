@@ -6,6 +6,10 @@ import {
   generateTokenId,
 } from "../../utils/idGenerator.js";
 import { log } from "../../utils/logger.js";
+import {
+  getUpstreamErrorMessage,
+  getUpstreamErrorStatus,
+} from "../../utils/upstreamErrorDetails.js";
 
 export {
   _ensureInitialized,
@@ -108,22 +112,8 @@ export async function _sendTestMessage(token) {
     await sendRequest();
     return { ok: true };
   } catch (error) {
-    const status =
-      error.response?.status || error.status || error.statusCode || 500;
-    let errorBody = "";
-    try {
-      const data = error.response?.data;
-      errorBody =
-        typeof data === "string"
-          ? data
-          : data
-            ? JSON.stringify(data)
-            : error.message;
-    } catch {
-      errorBody = error.message || "未知错误";
-    }
-
-    const errorText = String(errorBody || "");
+    const status = getUpstreamErrorStatus(error);
+    const errorText = getUpstreamErrorMessage(error, "未知错误");
 
     if (shouldRetryWithProjectId(status, errorText)) {
       try {
@@ -144,7 +134,7 @@ export async function _sendTestMessage(token) {
         }
       } catch (retryError) {
         log.warn(
-          `[Antigravity] 自动获取 projectId 后重试失败: ${retryError.message}`,
+          `[Antigravity] 自动获取 projectId 后重试失败: ${getUpstreamErrorMessage(retryError)}`,
         );
       }
     }
@@ -206,20 +196,20 @@ export async function enableTokenById(tokenId, options = {}) {
     try {
       await this.refreshToken(tokenData);
     } catch (error) {
-      const statusCode = error.statusCode || 500;
+      const statusCode = getUpstreamErrorStatus(error);
       if (statusCode === 403 || statusCode === 400) {
         log.warn(
-          `[启用检测] token ${tokenId} 刷新失败(${statusCode}): ${error.message}`,
+          `[启用检测] token ${tokenId} 刷新失败(${statusCode}): ${getUpstreamErrorMessage(error)}`,
         );
-        const message = `凭证不可用，刷新失败(${statusCode}): ${error.message}`;
+        const message = `凭证不可用，刷新失败(${statusCode}): ${getUpstreamErrorMessage(error)}`;
         await saveEnableError(message);
         return {
           success: false,
           message,
         };
       }
-      log.warn(`[启用检测] token ${tokenId} 刷新失败: ${error.message}`);
-      const refreshMessage = `凭证刷新失败: ${error.message}`;
+      log.warn(`[启用检测] token ${tokenId} 刷新失败: ${getUpstreamErrorMessage(error)}`);
+      const refreshMessage = `凭证刷新失败: ${getUpstreamErrorMessage(error)}`;
       await saveEnableError(refreshMessage);
       return { success: false, message: refreshMessage };
     }
@@ -245,13 +235,13 @@ export async function enableTokenById(tokenId, options = {}) {
         };
       }
     } catch (error) {
-      const statusCode = error.statusCode || 500;
+      const statusCode = getUpstreamErrorStatus(error);
       if (statusCode === 403 || statusCode === 401) {
         log.warn(
-          `[启用检测] token ${tokenId} 权限验证失败(${statusCode}): ${error.message}`,
+          `[启用检测] token ${tokenId} 权限验证失败(${statusCode}): ${getUpstreamErrorMessage(error)}`,
         );
         const permissionMessage =
-          `凭证不可用，权限验证失败(${statusCode}): ${error.message}`;
+          `凭证不可用，权限验证失败(${statusCode}): ${getUpstreamErrorMessage(error)}`;
         await saveEnableError(permissionMessage);
         return {
           success: false,
@@ -259,7 +249,7 @@ export async function enableTokenById(tokenId, options = {}) {
         };
       }
       log.warn(
-        `[启用检测] token ${tokenId} 获取 projectId 时出现非致命错误: ${error.message}，继续启用`,
+        `[启用检测] token ${tokenId} 获取 projectId 时出现非致命错误: ${getUpstreamErrorMessage(error)}，继续启用`,
       );
     }
 
@@ -312,7 +302,7 @@ export async function enableTokenById(tokenId, options = {}) {
     await this.reload();
     return { success: true, message: "Token启用成功" };
   } catch (error) {
-    log.error("启用Token失败:", error.message);
-    return { success: false, message: `启用失败: ${error.message}` };
+    log.error("启用Token失败:", getUpstreamErrorMessage(error));
+    return { success: false, message: `启用失败: ${getUpstreamErrorMessage(error)}` };
   }
 }

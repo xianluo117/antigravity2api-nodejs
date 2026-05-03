@@ -3,6 +3,7 @@ import config from "../../config/config.js";
 import { TokenError } from "../../utils/errors.js";
 import { buildAxiosRequestConfig } from "../../utils/httpClient.js";
 import { log } from "../../utils/logger.js";
+import { getUpstreamErrorMessage } from "../../utils/upstreamErrorDetails.js";
 
 const DEFAULT_SUBSCRIPTION = "free-tier";
 
@@ -55,7 +56,7 @@ export async function fetchProjectId(token) {
     );
   } catch (err) {
     log.warn(
-      `[fetchProjectId] loadCodeAssist 失败: ${err.message}，回退到 onboardUser`,
+      `[fetchProjectId] loadCodeAssist 失败: ${getUpstreamErrorMessage(err)}，回退到 onboardUser`,
     );
   }
 
@@ -76,7 +77,7 @@ export async function fetchProjectId(token) {
       credits: loadResult?.credits ?? 0,
     };
   } catch (err) {
-    log.error(`[fetchProjectId] onboardUser 失败: ${err.message}`);
+    log.error(`[fetchProjectId] onboardUser 失败: ${getUpstreamErrorMessage(err)}`);
     return {
       projectId: undefined,
       sub: loadResult?.sub ?? DEFAULT_SUBSCRIPTION,
@@ -236,7 +237,7 @@ export async function _getOnboardTier(token, loadCodeAssistData = null) {
     log.warn("[_getOnboardTier] 未找到默认 tier，使用 LEGACY");
     return "LEGACY";
   } catch (err) {
-    log.error(`[_getOnboardTier] 获取 tier 失败: ${err.message}`);
+    log.error(`[_getOnboardTier] 获取 tier 失败: ${getUpstreamErrorMessage(err)}`);
     return null;
   }
 }

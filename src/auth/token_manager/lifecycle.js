@@ -6,6 +6,10 @@ import { TokenError } from "../../utils/errors.js";
 import { buildAxiosRequestConfig } from "../../utils/httpClient.js";
 import { generateProjectId, generateTokenId } from "../../utils/idGenerator.js";
 import { log } from "../../utils/logger.js";
+import {
+  getUpstreamErrorMessage,
+  getUpstreamErrorStatus,
+} from "../../utils/upstreamErrorDetails.js";
 
 export async function _refreshExpiredTokensConcurrently() {
   const expiredTokens = this.tokens.filter((token) => this.isExpired(token));
@@ -72,9 +76,8 @@ export async function _refreshTokenSafe(token) {
     this._clearTokenError(token);
     return { action: "success" };
   } catch (error) {
-    const statusCode =
-      error.statusCode || error.response?.status || error.status || 500;
-    const rawMessage = error.message || "未知错误";
+    const statusCode = getUpstreamErrorStatus(error);
+    const rawMessage = getUpstreamErrorMessage(error, "未知错误");
     const reason = `启动检测刷新失败(${statusCode}): ${rawMessage}`;
     this._recordTokenError(token, reason, "startup_refresh");
     if (statusCode === 403 || statusCode === 400) {
@@ -158,19 +161,16 @@ export async function refreshToken(token, silent = false) {
         token.credits = subscription.credits;
       }
     } catch (subscriptionError) {
-      log.warn(`刷新后同步订阅/积分失败: ${subscriptionError.message}`);
+      log.warn(
+        `刷新后同步订阅/积分失败: ${getUpstreamErrorMessage(subscriptionError)}`,
+      );
     }
 
     this.saveToFile(token);
     return token;
   } catch (error) {
-    const statusCode =
-      error.response?.status || error.status || error.statusCode || 500;
-    const rawBody = error.response?.data;
-    const message =
-      typeof rawBody === "string"
-        ? rawBody
-        : rawBody?.error?.message || error.message || "刷新 token 失败";
+    const statusCode = getUpstreamErrorStatus(error);
+    const message = getUpstreamErrorMessage(error, "刷新 token 失败");
     const reason = `启动检测刷新失败(${statusCode}): ${message}`;
     this._recordTokenError(token, reason, "startup_refresh");
     throw new TokenError(message, tokenId, statusCode || 500);
@@ -214,9 +214,9 @@ export function _handleTokenError(error, token) {
     log.warn(`...${suffix}: Token 已失效或错误，已自动禁用该账号`);
     return {
       action: "disable",
-      reason: `Token准备失败(${error.statusCode}): ${error.message}`,
+      reason: `Token准备失败(${error.statusCode}): ${getUpstreamErrorMessage(error)}`,
     };
   }
-  log.error(`...${suffix} 操作失败:`, error.message);
+  log.error(`...${suffix} 操作失败:`, getUpstreamErrorMessage(error));
   return { action: "skip" };
 }

@@ -6,6 +6,10 @@ import { httpRequest } from "../utils/httpClient.js";
 import { generateTokenId } from "../utils/idGenerator.js";
 import { log } from "../utils/logger.js";
 import { getDataDir } from "../utils/paths.js";
+import {
+  getUpstreamErrorMessage,
+  getUpstreamErrorStatus,
+} from "../utils/upstreamErrorDetails.js";
 import * as lifecycleMethods from "./geminicli_token_manager/lifecycle.js";
 import * as projectMethods from "./geminicli_token_manager/project.js";
 import {
@@ -489,22 +493,8 @@ class GeminiCliTokenManager {
       await sendRequest();
       return { ok: true };
     } catch (error) {
-      const status =
-        error.response?.status || error.status || error.statusCode || 500;
-      let errorBody = "";
-      try {
-        const data = error.response?.data;
-        errorBody =
-          typeof data === "string"
-            ? data
-            : data
-              ? JSON.stringify(data)
-              : error.message;
-      } catch {
-        errorBody = error.message || "未知错误";
-      }
-
-      const errorText = String(errorBody || "");
+      const status = getUpstreamErrorStatus(error);
+      const errorText = getUpstreamErrorMessage(error, "未知错误");
 
       if (shouldRetryWithProjectId(status, errorText)) {
         try {
@@ -524,7 +514,7 @@ class GeminiCliTokenManager {
           }
         } catch (retryError) {
           log.warn(
-            `[GeminiCLI] 自动获取 projectId 后重试失败: ${retryError.message}`,
+            `[GeminiCLI] 自动获取 projectId 后重试失败: ${getUpstreamErrorMessage(retryError)}`,
           );
         }
       }
@@ -595,12 +585,12 @@ class GeminiCliTokenManager {
       try {
         await this.refreshToken(tokenData);
       } catch (error) {
-        const statusCode = error.statusCode || 500;
+        const statusCode = getUpstreamErrorStatus(error);
         if (statusCode === 403 || statusCode === 400) {
           log.warn(
-            `[GeminiCLI][启用检测] token ${tokenId} 刷新失败(${statusCode}): ${error.message}`,
+            `[GeminiCLI][启用检测] token ${tokenId} 刷新失败(${statusCode}): ${getUpstreamErrorMessage(error)}`,
           );
-          const msg = `凭证不可用，刷新失败(${statusCode}): ${error.message}`;
+          const msg = `凭证不可用，刷新失败(${statusCode}): ${getUpstreamErrorMessage(error)}`;
           await saveEnableError(msg);
           return {
             success: false,
@@ -608,9 +598,9 @@ class GeminiCliTokenManager {
           };
         }
         log.warn(
-          `[GeminiCLI][启用检测] token ${tokenId} 刷新失败: ${error.message}`,
+          `[GeminiCLI][启用检测] token ${tokenId} 刷新失败: ${getUpstreamErrorMessage(error)}`,
         );
-        const refreshMsg = `凭证刷新失败: ${error.message}`;
+        const refreshMsg = `凭证刷新失败: ${getUpstreamErrorMessage(error)}`;
         await saveEnableError(refreshMsg);
         return { success: false, message: refreshMsg };
       }
@@ -636,12 +626,12 @@ class GeminiCliTokenManager {
           };
         }
       } catch (error) {
-        const statusCode = error.statusCode || 500;
+        const statusCode = getUpstreamErrorStatus(error);
         if (statusCode === 403 || statusCode === 401) {
           log.warn(
-            `[GeminiCLI][启用检测] token ${tokenId} 权限验证失败(${statusCode}): ${error.message}`,
+            `[GeminiCLI][启用检测] token ${tokenId} 权限验证失败(${statusCode}): ${getUpstreamErrorMessage(error)}`,
           );
-          const permMsg = `凭证不可用，权限验证失败(${statusCode}): ${error.message}`;
+          const permMsg = `凭证不可用，权限验证失败(${statusCode}): ${getUpstreamErrorMessage(error)}`;
           await saveEnableError(permMsg);
           return {
             success: false,
@@ -650,7 +640,7 @@ class GeminiCliTokenManager {
         }
         // 非致命错误，继续启用
         log.warn(
-          `[GeminiCLI][启用检测] token ${tokenId} 获取 projectId 时出现非致命错误: ${error.message}，继续启用`,
+          `[GeminiCLI][启用检测] token ${tokenId} 获取 projectId 时出现非致命错误: ${getUpstreamErrorMessage(error)}，继续启用`,
         );
       }
 
@@ -705,8 +695,8 @@ class GeminiCliTokenManager {
       await this.reload();
       return { success: true, message: "Token更新成功" };
     } catch (error) {
-      log.error("[GeminiCLI] 启用Token失败:", error.message);
-      return { success: false, message: `启用失败: ${error.message}` };
+      log.error("[GeminiCLI] 启用Token失败:", getUpstreamErrorMessage(error));
+      return { success: false, message: `启用失败: ${getUpstreamErrorMessage(error)}` };
     }
   }
 

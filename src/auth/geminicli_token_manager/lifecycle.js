@@ -5,6 +5,10 @@ import { TokenError } from "../../utils/errors.js";
 import { buildAxiosRequestConfig } from "../../utils/httpClient.js";
 import { generateTokenId } from "../../utils/idGenerator.js";
 import { log } from "../../utils/logger.js";
+import {
+  getUpstreamErrorMessage,
+  getUpstreamErrorStatus,
+} from "../../utils/upstreamErrorDetails.js";
 
 const PERMANENT_REFRESH_ERROR_TEXTS = [
   "invalid_grant",
@@ -81,9 +85,8 @@ export async function _refreshTokenSafe(token) {
     this._clearTokenError(token);
     return { action: "success" };
   } catch (error) {
-    const statusCode =
-      error.statusCode || error.response?.status || error.status || 500;
-    const rawMessage = error.message || "未知错误";
+    const statusCode = getUpstreamErrorStatus(error);
+    const rawMessage = getUpstreamErrorMessage(error, "未知错误");
     const reason = `启动检测刷新失败(${statusCode}): ${rawMessage}`;
     this._recordTokenError(token, reason, "startup_refresh");
 
@@ -168,13 +171,8 @@ export async function refreshToken(token, silent = false) {
     this.saveToFile(token);
     return token;
   } catch (error) {
-    const statusCode =
-      error.response?.status || error.status || error.statusCode || 500;
-    const rawBody = error.response?.data;
-    const message =
-      typeof rawBody === "string"
-        ? rawBody
-        : rawBody?.error?.message || error.message || "刷新 token 失败";
+    const statusCode = getUpstreamErrorStatus(error);
+    const message = getUpstreamErrorMessage(error, "刷新 token 失败");
     const reason = `启动检测刷新失败(${statusCode}): ${message}`;
     this._recordTokenError(token, reason, "startup_refresh");
     throw new TokenError(message, tokenId, statusCode || 500);
@@ -217,9 +215,9 @@ export function _handleTokenError(error, token) {
     log.warn(`[GeminiCLI] ...${suffix}: Token 已失效或错误，已自动禁用该账号`);
     return {
       action: "disable",
-      reason: `Token准备失败(${error.statusCode}): ${error.message}`,
+      reason: `Token准备失败(${error.statusCode}): ${getUpstreamErrorMessage(error)}`,
     };
   }
-  log.error(`[GeminiCLI] ...${suffix} 操作失败:`, error.message);
+  log.error(`[GeminiCLI] ...${suffix} 操作失败:`, getUpstreamErrorMessage(error));
   return { action: "skip" };
 }

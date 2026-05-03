@@ -20,6 +20,10 @@ import logger from "../../utils/logger.js";
 import memoryManager from "../../utils/memoryManager.js";
 import { getEnvPath } from "../../utils/paths.js";
 import {
+  getUpstreamErrorMessage,
+  getUpstreamErrorStatus,
+} from "../../utils/upstreamErrorDetails.js";
+import {
   getProxyPoolSummary,
   moveProxyToDisabledPool,
   normalizeProxyPoolInput,
@@ -830,8 +834,9 @@ router.put("/tokens/:tokenId", cookieAuthMiddleware, async (req, res) => {
       res.json(result);
     }
   } catch (error) {
-    logger.error("更新Token失败:", error.message);
-    res.status(500).json({ success: false, message: error.message });
+    const message = getUpstreamErrorMessage(error);
+    logger.error("更新Token失败:", message);
+    res.status(getUpstreamErrorStatus(error)).json({ success: false, message });
   }
 });
 
@@ -955,7 +960,7 @@ router.post("/tokens/batch", cookieAuthMiddleware, async (req, res) => {
         results.push({
           tokenId,
           success: false,
-          message: error.message || "操作失败",
+          message: getUpstreamErrorMessage(error, "操作失败"),
         });
       }
     }
@@ -979,9 +984,10 @@ router.post("/tokens/:tokenId/refresh", cookieAuthMiddleware, async (req, res) =
     logger.info(`手动刷新Token: ${tokenId}`);
     res.json({ success: true, message: "Token刷新成功", data: result });
   } catch (error) {
-    logger.error("刷新Token失败:", error.message);
-    const status = error.statusCode || 500;
-    res.status(status).json({ success: false, message: error.message });
+    const message = getUpstreamErrorMessage(error);
+    logger.error("刷新Token失败:", message);
+    const status = getUpstreamErrorStatus(error);
+    res.status(status).json({ success: false, message });
   }
 });
 
@@ -1001,9 +1007,10 @@ router.post(
         credits: result.credits,
       });
     } catch (error) {
-      logger.error("获取ProjectId失败:", error.message);
-      const status = error.statusCode || 500;
-      res.status(status).json({ success: false, message: error.message });
+      const message = getUpstreamErrorMessage(error);
+      logger.error("获取ProjectId失败:", message);
+      const status = getUpstreamErrorStatus(error);
+      res.status(status).json({ success: false, message });
     }
   },
 );
@@ -1652,8 +1659,9 @@ router.put("/geminicli/tokens/:tokenId", cookieAuthMiddleware, async (req, res) 
       res.json(result);
     }
   } catch (error) {
-    logger.error("[GeminiCLI] 更新Token失败:", error.message);
-    res.status(500).json({ success: false, message: error.message });
+    const message = getUpstreamErrorMessage(error);
+    logger.error("[GeminiCLI] 更新Token失败:", message);
+    res.status(getUpstreamErrorStatus(error)).json({ success: false, message });
   }
 });
 
@@ -1777,7 +1785,7 @@ router.post("/geminicli/tokens/batch", cookieAuthMiddleware, async (req, res) =>
         results.push({
           tokenId,
           success: false,
-          message: error.message || "操作失败",
+          message: getUpstreamErrorMessage(error, "操作失败"),
         });
       }
     }
@@ -1804,9 +1812,10 @@ router.post(
       logger.info(`[GeminiCLI] 手动刷新Token: ${tokenId}`);
       res.json({ success: true, message: "Token刷新成功", data: result });
     } catch (error) {
-      logger.error("[GeminiCLI] 刷新Token失败:", error.message);
-      const status = error.statusCode || 500;
-      res.status(status).json({ success: false, message: error.message });
+      const message = getUpstreamErrorMessage(error);
+      logger.error("[GeminiCLI] 刷新Token失败:", message);
+      const status = getUpstreamErrorStatus(error);
+      res.status(status).json({ success: false, message });
     }
   },
 );
@@ -1828,9 +1837,10 @@ router.post(
         tier: result.tier || null,
       });
     } catch (error) {
-      logger.error("[GeminiCLI] 获取ProjectId失败:", error.message);
-      const status = error.statusCode || 500;
-      res.status(status).json({ success: false, message: error.message });
+      const message = getUpstreamErrorMessage(error);
+      logger.error("[GeminiCLI] 获取ProjectId失败:", message);
+      const status = getUpstreamErrorStatus(error);
+      res.status(status).json({ success: false, message });
     }
   },
 );
@@ -1850,9 +1860,10 @@ router.post(
         ...result,
       });
     } catch (error) {
-      logger.error("[GeminiCLI] 批量获取ProjectId失败:", error.message);
-      const status = error.statusCode || error.status || 500;
-      res.status(status).json({ success: false, message: error.message });
+      const message = getUpstreamErrorMessage(error);
+      logger.error("[GeminiCLI] 批量获取ProjectId失败:", message);
+      const status = getUpstreamErrorStatus(error);
+      res.status(status).json({ success: false, message });
     }
   },
 );

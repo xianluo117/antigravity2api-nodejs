@@ -3,6 +3,10 @@ import { TokenError } from "../../utils/errors.js";
 import { httpRequest } from "../../utils/httpClient.js";
 import { generateTokenId } from "../../utils/idGenerator.js";
 import { log } from "../../utils/logger.js";
+import {
+  getUpstreamErrorMessage,
+  getUpstreamErrorStatus,
+} from "../../utils/upstreamErrorDetails.js";
 
 const GEMINICLI_API_CONFIG = {
   HOST: "cloudcode-pa.googleapis.com",
@@ -124,8 +128,9 @@ export async function fetchProjectId(token) {
 
     return { projectId: null, tier };
   } catch (error) {
-    const status = error.response?.status || error.status || 500;
-    log.error(`[GeminiCLI] 获取 projectId 失败 (${status}):`, error.message);
+    const status = getUpstreamErrorStatus(error);
+    const errorMessage = getUpstreamErrorMessage(error);
+    log.error(`[GeminiCLI] 获取 projectId 失败 (${status}):`, errorMessage);
 
     if (status === 403 || status === 401) {
       throw new TokenError("Token 无权限获取 projectId", tokenId, status);
@@ -142,12 +147,12 @@ export async function fetchProjectId(token) {
     } catch (fallbackError) {
       log.error(
         `[GeminiCLI] Google Cloud 项目列表回退也失败:`,
-        fallbackError.message,
+        getUpstreamErrorMessage(fallbackError),
       );
     }
 
     throw new TokenError(
-      `获取 projectId 失败: ${error.message}`,
+      `获取 projectId 失败: ${errorMessage}`,
       tokenId,
       status,
     );
@@ -198,7 +203,7 @@ export async function _tryOnboardUser(
 
       await new Promise((resolve) => setTimeout(resolve, ONBOARD_USER_POLL_INTERVAL_MS));
     } catch (error) {
-      log.error(`[GeminiCLI] onboardUser 失败:`, error.message);
+      log.error(`[GeminiCLI] onboardUser 失败:`, getUpstreamErrorMessage(error));
       throw error;
     }
   }
@@ -255,10 +260,10 @@ export async function _tryGoogleCloudProjectList(token) {
 
     return null;
   } catch (error) {
-    const status = error.response?.status || error.status || 500;
+    const status = getUpstreamErrorStatus(error);
     log.error(
       `[GeminiCLI] Google Cloud 项目列表查询失败 (${status}):`,
-      error.message,
+      getUpstreamErrorMessage(error),
     );
     return null;
   }
